@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Earthsiege II: Resistance
+Comment=Pilot a HERC in a native 3D mech combat game
+Exec=earthsiege
+Icon=earthsiege
+Terminal=false
+Categories=Game;ActionGame;
+Keywords=mech;herc;earthsiege;

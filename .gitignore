@@ -1,0 +1,14 @@
+/build/
+/build-*/
+/dist/
+/pilot-data/
+/save/
+/.agents/
+/.aws/
+/.codex/
+.env
+.env.*
+*.sav
+*.sav.tmp
+*.ppm
+*.bmp
