@@ -3,9 +3,9 @@
 
 namespace siege {
 const Chassis chassis[3] = {
-    {"NOMAD", "MEDIUM / MULTIROLE",110,100,22,10,1.0f},
-    {"BASTION", "HEAVY / ASSAULT",165,130,15,14,1.15f},
-    {"STRIDER", "LIGHT / RECON",80,80,30,8,0.95f}
+    {"NOMAD", "MEDIUM / MULTIROLE",110,100,13,10,1.0f,65},
+    {"BASTION", "HEAVY / ASSAULT",165,130,9,14,1.15f,100},
+    {"STRIDER", "LIGHT / RECON",80,80,18,8,0.95f,40}
 };
 const Mission missions[3] = {
     {"DUST TO DUST","CINDER BASIN", "Eliminate the Cybrid patrol. Recover salvage. Reach extraction.",4,0.75f},
@@ -14,7 +14,9 @@ const Mission missions[3] = {
 };
 float terrainHeight(float x,float z) {
     // Keep the combat arena gently rolling; mountains are separate scenery.
-    return std::sin(x*0.022f)*std::cos(z*0.018f)*1.9f + std::sin(z*0.044f+x*0.012f)*0.65f;
+    float ridges=(std::max(0.0f,std::abs(x)-145)*0.24f+std::max(0.0f,std::abs(z)-300)*0.27f);
+    ridges*=0.85f+0.28f*std::sin(x*0.016f+z*0.009f)+0.18f*std::cos(z*0.023f);
+    return std::sin(x*0.022f)*std::cos(z*0.018f)*1.9f + std::sin(z*0.044f+x*0.012f)*0.65f+ridges;
 }
 const std::vector<Obstacle>& obstacles() {
     static const std::vector<Obstacle> result=[] {
@@ -47,8 +49,23 @@ static void resolveMovement(Vec3& position,Vec3 previous,float radius) {
     position.x=previous.x;position.z=previous.z;
 }
 float Combat::random(float low,float high) { return std::uniform_real_distribution<float>(low,high)(rng); }
-Vec3 Combat::eye() const { return player.pos+Vec3{0,8.2f+std::sin(player.walk*2)*std::min(std::abs(player.speed)*0.018f,0.27f),0}; }
+Vec3 Combat::eye() const { return player.pos+Vec3{0,8.2f,0}; }
 Vec3 Combat::aim() const { return direction(player.yaw+player.torso,player.pitch); }
+Vec3 Combat::cameraEye() const {
+    Vec3 offset=player.gait.displacement();
+    return eye()+direction(player.yaw+pi/2)*offset.x+Vec3{0,offset.y,0}+direction(player.yaw)*offset.z;
+}
+Vec3 Combat::cameraAim() const {
+    // The guns retain their commanded direction; camera suspension is cosmetic.
+    return direction(player.yaw+player.torso,player.pitch+player.gait.bounce*0.018f);
+}
+float Combat::cameraRoll() const { return player.gait.sway*0.06f; }
+StartupStage Combat::startupStage() const {
+    if(startupTime<2.1f)return StartupStage::Ignition;
+    if(startupTime<3.55f)return StartupStage::Systems;
+    if(startupTime<5.2f)return StartupStage::Hydraulics;
+    return StartupStage::Online;
+}
 void Combat::announce(const std::string& text,float seconds) { message=text; messageTime=seconds; }
 void Combat::reset(int selectedChassis,int selectedMission,int shieldUpgrades,int weaponUpgrades) {
     *this=Combat{};
@@ -56,12 +73,13 @@ void Combat::reset(int selectedChassis,int selectedMission,int shieldUpgrades,in
     const auto& c=chassis[chassisIndex];
     player.maxArmor=player.armor=c.armor;
     player.maxShield=player.shield=c.shield+std::clamp(shieldUpgrades,0,3)*20;
-    player.maxSpeed=c.speed; player.missiles=c.missiles;
+    player.maxSpeed=c.speed; player.missiles=c.missiles;player.mass=c.mass;
     player.damage=c.damage*(1+std::clamp(weaponUpgrades,0,3)*0.12f);
     player.pos.y=terrainHeight(player.pos.x,player.pos.z);
     extraction.y=terrainHeight(extraction.x,extraction.z);
     spawnWave();
-    announce("COMMAND // Weapons free. Bring our people home.",6);
+    events.clear();events.emplace_back(Event::ReactorIgnition,1,0,c.mass);
+    announce("REACTOR // Containment established. Ignition sequence.",startupDuration);
 }
 void Combat::spawnWave() {
     ++wave;
@@ -120,7 +138,7 @@ void Combat::selectTarget() {
     target=-1;
 }
 void Combat::fire(int weapon) {
-    if(phase!=Phase::Active||player.overheated) return;
+    if(phase!=Phase::Active||!ready()||player.overheated) return;
     bool missile=weapon==2;
     if((missile?player.missileCooldown:player.cooldown)>0) return;
     if(missile&&player.missiles<=0) { announce("MISSILE RACK EMPTY // Switch to laser or autocannon.",2); return; }
@@ -162,26 +180,55 @@ void Combat::fire(int weapon) {
 }
 void Combat::update(float dt,const Controls& input) {
     if(phase!=Phase::Active) return;
-    dt=clamp(dt,0,0.05f); time+=dt;
+    dt=clamp(dt,0,0.05f);
+    if(!ready()) {
+        float previous=startupTime;
+        startupTime=std::min(startupDuration,startupTime+dt);
+        const float moments[]={2.1f,3.55f,5.2f};
+        const Event cues[]={Event::SystemInit,Event::MechanicalActivate,Event::ReactorReady};
+        for(int i=0;i<3;++i)if(previous<moments[i]&&startupTime>=moments[i])events.emplace_back(cues[i],1,0,player.mass);
+        if(ready())announce("COMMAND // All systems online. Weapons free.",5);
+        // Enemies and mission time wait for deployment; pause freezes startup too.
+        return;
+    }
+    time+=dt;
     player.cooldown=std::max(0.0f,player.cooldown-dt);
     player.missileCooldown=std::max(0.0f,player.missileCooldown-dt);
     player.sinceHit+=dt; player.heat=std::max(0.0f,player.heat-dt*12);
     hitFlash=std::max(0.0f,hitFlash-dt); damageFlash=std::max(0.0f,damageFlash-dt); messageTime=std::max(0.0f,messageTime-dt);
     if(player.overheated&&player.heat<42) player.overheated=false;
     if(player.sinceHit>5) player.shield=std::min(player.maxShield,player.shield+dt*9);
-    bool boosting=input.boost&&!player.overheated&&std::abs(input.throttle)>0.1f;
+    bool boosting=input.boost&&!player.overheated;
+    if(boosting!=player.turboEngaged) {
+        events.emplace_back(boosting?Event::TurboEngage:Event::TurboRelease,0.8f,0,player.mass);
+        player.turboEngaged=boosting;
+    }
+    player.turboPower+=clamp((boosting?1.0f:0.0f)-player.turboPower,-dt*0.65f,dt*0.85f);
     if(boosting) { player.heat=std::min(100.0f,player.heat+dt*24); if(player.heat>=100) {player.overheated=true;events.push_back(Event::Overheat);} }
-    float desired=input.throttle*player.maxSpeed*(boosting?1.6f:1)*(input.throttle<0?0.55f:1);
-    player.speed+=(desired-player.speed)*std::min(1.0f,dt*2.1f);
-    player.yaw=std::remainder(player.yaw+input.turn*dt*1.1f,2*pi);
+    float desired=input.throttle*player.maxSpeed*(1+player.turboPower*0.6f)*(input.throttle<0?0.55f:1);
+    float acceleration=3.2f*65/player.mass*(1+player.turboPower*0.35f);
+    float braking=(input.throttle*player.speed<=0)?1.6f:1;
+    player.speed+=clamp(desired-player.speed,-acceleration*braking*dt,acceleration*braking*dt);
+    float desiredSide=input.strafe*player.maxSpeed*0.48f;
+    player.sideSpeed+=clamp(desiredSide-player.sideSpeed,-acceleration*dt,acceleration*dt);
+    float turnSpeed=0.65f*std::sqrt(65/player.mass);
+    player.turnRate+=clamp(input.turn*turnSpeed-player.turnRate,-dt*1.2f,dt*1.2f);
+    player.yaw=std::remainder(player.yaw+player.turnRate*dt,2*pi);
     Vec3 previousPlayer=player.pos;
     player.pos+=direction(player.yaw)*(player.speed*dt);
-    player.pos+=direction(player.yaw+pi/2)*(input.strafe*player.maxSpeed*0.55f*dt);
+    player.pos+=direction(player.yaw+pi/2)*(player.sideSpeed*dt);
     player.pos.x=clamp(player.pos.x,-310,310); player.pos.z=clamp(player.pos.z,-310,260);
     resolveMovement(player.pos,previousPlayer,3.5f);
     player.pos.y=terrainHeight(player.pos.x,player.pos.z);
-    float oldWalk=player.walk; player.walk+=std::abs(player.speed)*dt*0.19f;
-    if(int(oldWalk/pi)!=int(player.walk/pi)) events.push_back(Event::Step);
+    Vec3 motion=dt>0?(player.pos-previousPlayer)*(1/dt):Vec3{};motion.y=0;
+    std::array<GaitTransition,4> transitions{};
+    int count=player.gait.advance(dt,dot(motion,direction(player.yaw)),dot(motion,direction(player.yaw+pi/2)),
+                                  player.turnRate,player.maxSpeed,player.mass,transitions);
+    for(int i=0;i<count;++i) {
+        const auto& step=transitions[i];
+        Event event=step.contact?(step.side<0?Event::FootLeft:Event::FootRight):(step.side<0?Event::HydraulicLeft:Event::HydraulicRight);
+        events.emplace_back(event,step.strength*(1+player.turboPower*0.12f),step.side*0.3f,player.mass,player.gait.speed/player.maxSpeed);
+    }
     if(input.fire) fire(player.weapon);
     if(input.missile) fire(2);
     int alive=0;
@@ -204,7 +251,14 @@ void Combat::update(float dt,const Controls& input) {
         e.pos.x=clamp(e.pos.x,-290,290); e.pos.z=clamp(e.pos.z,-290,245);
         resolveMovement(e.pos,previousEnemy,3.5f);
         e.pos.y=terrainHeight(e.pos.x,e.pos.z);
-        e.walk+=dt*(std::abs(move)+length(lateral))*0.24f;
+        Vec3 enemyMotion=dt>0?(e.pos-previousEnemy)*(1/dt):Vec3{};enemyMotion.y=0;
+        int enemySteps=e.gait.advance(dt,dot(enemyMotion,direction(e.yaw)),dot(enemyMotion,direction(e.yaw+pi/2)),0,
+                                     chassis[e.type].speed,chassis[e.type].mass,transitions);
+        for(int i=0;i<enemySteps;++i)if(transitions[i].contact&&distance<85) {
+            float attenuation=0.20f*std::pow(1-distance/85,2);
+            float pan=dot(normalized(e.pos-player.pos),direction(player.yaw+player.torso+pi/2));
+            events.emplace_back(transitions[i].side<0?Event::FootLeft:Event::FootRight,attenuation*transitions[i].strength,pan*0.8f,chassis[e.type].mass);
+        }
         e.cooldown-=dt;
         if(e.cooldown<=0&&distance<240) {
             Vec3 start=e.pos+Vec3{0,8,0};

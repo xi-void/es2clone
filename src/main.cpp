@@ -20,11 +20,11 @@ struct Options {
 static void help() {
     std::cout<<"Earthsiege II: Resistance - native Linux mech combat\n\n"
              <<"Usage: earthsiege [--mute] [--save-dir PATH]\n"
-             <<"       earthsiege --smoke-test [--scene menu|hangar|combat|pause|controls|debrief|flow]\n"
+             <<"       earthsiege --smoke-test [--scene menu|hangar|startup|combat|pause|controls|audio|debrief|flow]\n"
              <<"                  [--frames N] [--screenshot image.ppm] [--save-dir PATH]\n\n"
              <<"W/S move; A/D turn; Q/E strafe; mouse aims torso; C centers torso\n"
              <<"Left mouse/Space fire; right mouse missile; 1/2/3 weapon; T/Tab target\n"
-             <<"Shift boost; Escape pause; F1 controls; M mute; F11 fullscreen\n";
+             <<"Shift turbo; Escape pause; F1 controls; F2 audio mixer; M mute; F11 fullscreen\n";
 }
 static std::string dataDirectory() {
     const char* xdg=std::getenv("XDG_DATA_HOME");
@@ -36,15 +36,18 @@ static std::string dataDirectory() {
 static void load(UIState& ui,const std::string& directory) {
     std::ifstream file(fs::path(directory)/"pilot.sav");
     std::string version;int bank=0,shield=0,weapon=0,completed=0,chassis=0,mission=0,mute=0;
-    if(file>>version>>bank>>shield>>weapon>>completed>>chassis>>mission>>mute&&version=="ESR1") {
+    if(file>>version>>bank>>shield>>weapon>>completed>>chassis>>mission>>mute&&(version=="ESR1"||version=="ESR2")) {
         ui.bank=std::clamp(bank,0,1000000);ui.shieldUpgrade=std::clamp(shield,0,3);ui.weaponUpgrade=std::clamp(weapon,0,3);
         ui.completed=std::clamp(completed,0,3);ui.chassis=std::clamp(chassis,0,2);ui.mission=std::clamp(mission,0,2);ui.muted=mute!=0;
+        if(version=="ESR2")for(float& volume:ui.volumes){float value;if(file>>value&&std::isfinite(value))volume=clamp(value,0,1);}
     }
 }
 static bool save(const UIState& ui,const std::string& directory) {
     std::error_code error;fs::create_directories(directory,error);if(error)return false;
     fs::path target=fs::path(directory)/"pilot.sav",temporary=fs::path(directory)/"pilot.sav.tmp";
-    std::ofstream file(temporary);file<<"ESR1\n"<<ui.bank<<' '<<ui.shieldUpgrade<<' '<<ui.weaponUpgrade<<' '<<ui.completed<<' '<<ui.chassis<<' '<<ui.mission<<' '<<int(ui.muted)<<'\n';file.close();if(!file)return false;
+    std::ofstream file(temporary);file<<"ESR2\n"<<ui.bank<<' '<<ui.shieldUpgrade<<' '<<ui.weaponUpgrade<<' '<<ui.completed<<' '<<ui.chassis<<' '<<ui.mission<<' '<<int(ui.muted)<<'\n';
+    for(float volume:ui.volumes)file<<volume<<' ';
+    file<<'\n';file.close();if(!file)return false;
     fs::rename(temporary,target,error);return !error;
 }
 int main(int argc,char** argv) {
@@ -61,7 +64,7 @@ int main(int argc,char** argv) {
             else throw std::runtime_error("Unknown argument: "+arg);
         } catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 2;}
     }
-    if(options.scene!="menu"&&options.scene!="hangar"&&options.scene!="combat"&&options.scene!="pause"&&options.scene!="controls"&&options.scene!="debrief"&&options.scene!="flow"){std::cerr<<"Unknown scene\n";return 2;}
+    if(options.scene!="menu"&&options.scene!="hangar"&&options.scene!="startup"&&options.scene!="combat"&&options.scene!="pause"&&options.scene!="controls"&&options.scene!="audio"&&options.scene!="debrief"&&options.scene!="flow"){std::cerr<<"Unknown scene\n";return 2;}
     if(!options.smoke&&options.scene!="menu"){std::cerr<<"--scene requires --smoke-test\n";return 2;}
     if(options.smoke&&options.frames==0)options.frames=120;
     if(options.saveDir.empty())options.saveDir=options.smoke?(fs::temp_directory_path()/"earthsiege-smoke").string():dataDirectory();
@@ -88,20 +91,21 @@ int main(int argc,char** argv) {
     if(!renderer.init(assets.string())){renderer.destroy();SDL_GL_DeleteContext(context);SDL_DestroyWindow(window);TTF_Quit();SDL_Quit();return 1;}
     Audio audio;
     if(SDL_InitSubSystem(SDL_INIT_AUDIO)!=0||!audio.init())std::cerr<<"Audio unavailable; continuing without sound: "<<SDL_GetError()<<'\n';
-    UIState ui;if(!options.smoke)load(ui,options.saveDir);if(options.mute||options.smoke)ui.muted=true;audio.setMuted(ui.muted);
+    UIState ui;if(!options.smoke)load(ui,options.saveDir);if(options.mute||options.smoke)ui.muted=true;audio.setMuted(ui.muted);audio.setVolumes(ui.volumes);audio.setSuspended(true);
     Combat game;game.reset();bool running=true,banked=false,mouseDown=false,rightDown=false;
     auto notify=[&](const std::string& message){ui.notice=message;ui.noticeTime=4;};
     auto persist=[&](){if(!save(ui,options.saveDir))notify("Could not save pilot data. Check the save directory.");};
     auto capture=[&](bool enabled){mouseDown=rightDown=false;if(!options.smoke){if(SDL_SetRelativeMouseMode(enabled?SDL_TRUE:SDL_FALSE)!=0&&enabled)notify("Mouse capture unavailable. Use arrow keys to aim.");SDL_ShowCursor(enabled?SDL_DISABLE:SDL_ENABLE);}};
-    auto launch=[&](){game.reset(ui.chassis,ui.mission,ui.shieldUpgrade,ui.weaponUpgrade);banked=false;ui.screen=Screen::Playing;capture(true);persist();};
+    auto launch=[&](){audio.reset();game.reset(ui.chassis,ui.mission,ui.shieldUpgrade,ui.weaponUpgrade);banked=false;ui.screen=Screen::Playing;capture(true);persist();};
     auto act=[&](Action action){
         if(action!=Action::None)audio.play(Event::Lock);
         switch(action){
         case Action::Launch:case Action::Retry:launch();break;
         case Action::Next:ui.mission=(ui.mission+1)%3;launch();break;
-        case Action::Hangar:ui.screen=Screen::Hangar;capture(false);audio.setEngine(0);break;
-        case Action::Back:if(ui.screen==Screen::Controls)ui.screen=ui.returnScreen;else ui.screen=Screen::Menu;break;
+        case Action::Hangar:ui.screen=Screen::Hangar;capture(false);audio.reset();break;
+        case Action::Back:if(ui.screen==Screen::Controls||ui.screen==Screen::AudioSettings)ui.screen=ui.returnScreen;else ui.screen=Screen::Menu;break;
         case Action::Controls:ui.returnScreen=ui.screen;ui.screen=Screen::Controls;capture(false);break;
+        case Action::AudioSettings:ui.returnScreen=ui.screen;ui.screen=Screen::AudioSettings;capture(false);break;
         case Action::Quit:running=false;break;
         case Action::Sound:ui.muted=!ui.muted;audio.setMuted(ui.muted);persist();break;
         case Action::Fullscreen:ui.fullscreen=!ui.fullscreen;if(SDL_SetWindowFullscreen(window,ui.fullscreen?SDL_WINDOW_FULLSCREEN_DESKTOP:0)!=0){ui.fullscreen=!ui.fullscreen;notify("Fullscreen unavailable on this display.");}break;
@@ -112,13 +116,21 @@ int main(int argc,char** argv) {
         case Action::Resume:ui.screen=Screen::Playing;capture(true);break;
         case Action::ShieldUpgrade:{int cost=80+ui.shieldUpgrade*40;if(ui.shieldUpgrade<3&&ui.bank>=cost){ui.bank-=cost;++ui.shieldUpgrade;persist();notify("Shield capacitor upgraded across all HERCs.");}break;}
         case Action::WeaponUpgrade:{int cost=100+ui.weaponUpgrade*50;if(ui.weaponUpgrade<3&&ui.bank>=cost){ui.bank-=cost;++ui.weaponUpgrade;persist();notify("Weapon amplifier upgraded across all HERCs.");}break;}
+        case Action::MusicDown:case Action::MusicUp:case Action::WeaponsDown:case Action::WeaponsUp:
+        case Action::MachineryDown:case Action::MachineryUp:case Action::InterfaceDown:case Action::InterfaceUp:{
+            int control=int(action)-int(Action::MusicDown),bus=control/2;
+            ui.volumes[size_t(bus)]=clamp(ui.volumes[size_t(bus)]+(control%2?0.1f:-0.1f),0,1);
+            audio.setVolumes(ui.volumes);persist();break;
+        }
         case Action::None:break;
         }
     };
     if(options.smoke){
         if(options.scene=="flow"){ui.bank=300;options.frames=std::max(options.frames,32);}
-        if(options.scene=="combat"||options.scene=="pause"||options.scene=="debrief"){game.reset();ui.screen=Screen::Playing;}
+        if(options.scene=="combat"||options.scene=="pause"||options.scene=="debrief"){game.reset();while(!game.ready())game.update(1.0f/120,{});game.events.clear();ui.screen=Screen::Playing;}
         if(options.scene=="hangar")ui.screen=Screen::Hangar;
+        if(options.scene=="startup")ui.screen=Screen::Playing;
+        if(options.scene=="audio")ui.screen=Screen::AudioSettings;
         if(options.scene=="pause")ui.screen=Screen::Paused;
         if(options.scene=="controls")ui.screen=Screen::Controls;
         if(options.scene=="debrief"){ui.screen=Screen::Debrief;game.phase=Phase::Won;game.kills=4;game.salvage=195;game.time=126;ui.bank=195;}
@@ -141,15 +153,17 @@ int main(int argc,char** argv) {
             case 6:check(ui.screen==Screen::Menu,"hangar back");click(540,535);break;
             case 7:check(ui.mission==1,"select mission");key(SDLK_RETURN);break;
             case 8:check(ui.screen==Screen::Playing&&game.chassisIndex==1&&game.mission==1&&game.player.maxShield==150,"deploy chosen loadout");key(SDLK_2);break;
-            case 9:check(game.player.weapon==1,"weapon hotkey");key(SDLK_ESCAPE);pausedTime=game.time;break;
-            case 10:check(ui.screen==Screen::Paused&&game.time==pausedTime,"pause freezes simulation");key(SDLK_F1);break;
+            case 9:check(game.player.weapon==1,"weapon hotkey");key(SDLK_ESCAPE);pausedTime=game.startupTime;break;
+            case 10:check(ui.screen==Screen::Paused&&game.startupTime==pausedTime,"pause freezes startup and simulation");key(SDLK_F1);break;
             case 11:check(ui.screen==Screen::Controls,"field manual from pause");key(SDLK_ESCAPE);break;
             case 12:check(ui.screen==Screen::Paused,"manual returns to pause");key(SDLK_RETURN);break;
-            case 13:check(ui.screen==Screen::Playing&&game.time>pausedTime,"resume mission");key(SDLK_ESCAPE);break;
+            case 13:check(ui.screen==Screen::Playing&&game.startupTime>pausedTime,"resume startup");key(SDLK_ESCAPE);break;
             case 14:click(700,550);break;
             case 15:check(ui.screen==Screen::Playing&&game.kills==0&&game.player.missiles==14,"restart mission");key(SDLK_ESCAPE);break;
             case 16:click(700,620);break;
-            case 17:check(ui.screen==Screen::Hangar,"return to hangar");{UIState restored;load(restored,options.saveDir);check(restored.bank==120&&restored.chassis==1&&restored.mission==1&&restored.shieldUpgrade==1&&restored.weaponUpgrade==1,"pilot save round trip");}break;
+            case 17:check(ui.screen==Screen::Hangar,"return to hangar");{UIState restored;load(restored,options.saveDir);check(restored.bank==120&&restored.chassis==1&&restored.mission==1&&restored.shieldUpgrade==1&&restored.weaponUpgrade==1,"pilot save round trip");}key(SDLK_F2);break;
+            case 18:check(ui.screen==Screen::AudioSettings,"audio settings hotkey");click(835,314);break;
+            case 19:check(ui.volumes[0]<defaultVolumes[0],"independent music volume");{UIState restored;load(restored,options.saveDir);check(std::abs(restored.volumes[0]-ui.volumes[0])<0.001f&&restored.volumes[2]==1,"volume persistence");}key(SDLK_ESCAPE);break;
             default:break;
             }
         }
@@ -170,15 +184,17 @@ int main(int argc,char** argv) {
             if(event.type==SDL_KEYDOWN&&!event.key.repeat){auto key=event.key.keysym.sym;
                 if(key==SDLK_F11)act(Action::Fullscreen);
                 else if(key==SDLK_m)act(Action::Sound);
+                else if(key==SDLK_F2){if(ui.screen==Screen::AudioSettings)act(Action::Back);else{if(ui.screen==Screen::Playing){ui.screen=Screen::Paused;capture(false);}act(Action::AudioSettings);}}
                 else if(key==SDLK_F1){if(ui.screen==Screen::Controls)act(Action::Back);else {if(ui.screen==Screen::Playing){ui.screen=Screen::Paused;capture(false);}act(Action::Controls);}}
-                else if(key==SDLK_ESCAPE){if(ui.screen==Screen::Playing){ui.screen=Screen::Paused;capture(false);}else if(ui.screen==Screen::Paused)act(Action::Resume);else if(ui.screen==Screen::Controls||ui.screen==Screen::Hangar)act(Action::Back);else if(ui.screen==Screen::Debrief)ui.screen=Screen::Menu;else running=false;}
+                else if(key==SDLK_ESCAPE){if(ui.screen==Screen::Playing){ui.screen=Screen::Paused;capture(false);}else if(ui.screen==Screen::Paused)act(Action::Resume);else if(ui.screen==Screen::Controls||ui.screen==Screen::Hangar||ui.screen==Screen::AudioSettings)act(Action::Back);else if(ui.screen==Screen::Debrief)ui.screen=Screen::Menu;else running=false;}
                 else if(ui.screen==Screen::Playing){if(key>=SDLK_1&&key<=SDLK_3)game.player.weapon=int(key-SDLK_1);if(key==SDLK_t||key==SDLK_TAB)game.selectTarget();if(key==SDLK_c){game.player.torso=0;game.player.pitch=0;}}
                 else if(ui.screen==Screen::Menu||ui.screen==Screen::Hangar){if(key==SDLK_RETURN)act(Action::Launch);if(key==SDLK_h)act(Action::Hangar);if(key==SDLK_LEFT)act(ui.screen==Screen::Hangar?Action::PrevChassis:Action::PrevMission);if(key==SDLK_RIGHT)act(ui.screen==Screen::Hangar?Action::NextChassis:Action::NextMission);}
                 else if(ui.screen==Screen::Paused&&key==SDLK_RETURN)act(Action::Resume);
                 else if(ui.screen==Screen::Debrief&&key==SDLK_RETURN)act(game.phase==Phase::Won?Action::Next:Action::Retry);
             }
         }
-        if(ui.screen==Screen::Playing){
+        bool simulated=ui.screen==Screen::Playing;
+        if(simulated){
             const Uint8* keys=SDL_GetKeyboardState(nullptr);Controls input;
             input.throttle=float(keys[SDL_SCANCODE_W])-keys[SDL_SCANCODE_S];input.turn=float(keys[SDL_SCANCODE_D])-keys[SDL_SCANCODE_A];input.strafe=float(keys[SDL_SCANCODE_E])-keys[SDL_SCANCODE_Q];input.boost=keys[SDL_SCANCODE_LSHIFT]||keys[SDL_SCANCODE_RSHIFT];input.fire=mouseDown||keys[SDL_SCANCODE_SPACE];input.missile=rightDown;
             game.player.torso=clamp(game.player.torso+(float(keys[SDL_SCANCODE_RIGHT])-keys[SDL_SCANCODE_LEFT])*dt,-1.4f,1.4f);
@@ -186,10 +202,11 @@ int main(int argc,char** argv) {
             if(options.smoke){input.throttle=frame<100?0.5f:0;input.fire=frame%70<20;}
             accumulated+=dt;
             while(accumulated>=1.0f/120){game.update(1.0f/120,input);accumulated-=1.0f/120;}
-            audio.setEngine(0.3f+std::abs(game.player.speed)/game.player.maxSpeed*0.5f);
             if(game.phase!=Phase::Active){ui.screen=Screen::Debrief;capture(false);if(game.phase==Phase::Won&&!banked){ui.bank+=game.salvage;ui.completed=std::max(ui.completed,ui.mission+1);banked=true;persist();}}
-        } else {accumulated=0;audio.setEngine(0);}
-        for(auto event:game.events)audio.play(event);
+        } else {accumulated=0;}
+        audio.setSuspended(ui.screen!=Screen::Playing);
+        audio.setDrive({clamp(game.startupTime/2.1f,0,1),clamp(game.player.gait.speed/game.player.maxSpeed,0,1.6f),std::abs(game.player.gait.load),game.player.mass,game.player.turboPower});
+        if(simulated)for(const auto& event:game.events)audio.play(event);
         game.events.clear();
         SDL_GL_GetDrawableSize(window,&width,&height);renderer.render(width,height,game,ui);
         ++frame;

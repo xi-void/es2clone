@@ -7,6 +7,7 @@ package_name="earthsiege-linux-$(uname -m)"
 package_root="build/package/$package_name"
 mkdir -p "$package_root" dist
 cp build/earthsiege "$package_root/earthsiege"
+cp build/audio_preview "$package_root/audio_preview"
 cp -R assets "$package_root/"
 cp README.md "$package_root/README.md"
 cp -R docs "$package_root/"

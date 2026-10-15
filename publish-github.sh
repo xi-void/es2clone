@@ -32,7 +32,7 @@ if ! git diff --cached --quiet; then
     exit 1
 fi
 
-git add -- .gitignore CMakeLists.txt README.md run.sh package.sh publish-github.sh src tests assets docs
+git add -- .gitignore CMakeLists.txt README.md run.sh package.sh publish-github.sh src tests tools assets docs
 if ! git diff --cached --quiet; then
     git commit -m "Save playable native Linux Earthsiege prototype"
 fi

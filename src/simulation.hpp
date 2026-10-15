@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <random>
@@ -25,26 +26,55 @@ float terrainHeight(float x,float z);
 struct Obstacle { Vec3 center,halfSize; };
 const std::vector<Obstacle>& obstacles();
 bool solidAt(Vec3 position,float radius=0);
-struct Chassis { const char* name; const char* role; float armor,shield,speed; int missiles; float damage; };
+struct Chassis { const char* name; const char* role; float armor,shield,speed; int missiles; float damage,mass; };
 extern const Chassis chassis[3];
 struct Mission { const char* name; const char* region; const char* brief; int enemies; float enemyPower; };
 extern const Mission missions[3];
 enum class Phase { Active, Won, Lost };
-enum class Event { Laser, Cannon, Missile, Impact, Explosion, Lock, Wave, Win, Lose, Step, Overheat };
+enum class Event { Laser, Cannon, Missile, Impact, Explosion, Lock, Wave, Win, Lose, Overheat,
+    FootLeft, FootRight, HydraulicLeft, HydraulicRight, ReactorIgnition, SystemInit, MechanicalActivate, ReactorReady,
+    TurboEngage, TurboRelease, Count };
+struct SoundEvent {
+    Event type;
+    float strength=1,pan=0,mass=65,activity=0;
+    SoundEvent(Event event,float intensity=1,float position=0,float tons=65,float motion=0)
+        : type(event),strength(intensity),pan(position),mass(tons),activity(motion) {}
+};
+// One phase defines both rendered foot trajectories and touchdown/liftoff events.
+// A foot is planted for 60% of its stride; the remaining 40% is its swing.
+struct FootPose { Vec3 offset; bool planted=true; };
+struct GaitTransition { int side=0; bool contact=false; float strength=0; };
+struct Gait {
+    double phase=0;
+    float travel=0,blend=0,forward=1,sideways=0,pivot=0,speed=0,load=0;
+    float bounce=0,bounceVelocity=0,sway=0,swayVelocity=0,settleStrength=0;
+    unsigned contacts=0;
+    FootPose foot(int side) const;
+    float bodyLift() const;
+    Vec3 displacement() const;
+    // No allocation: a 50 ms tick cannot cross more than four gait boundaries.
+    int advance(float dt,float forwardSpeed,float sideSpeed,float turnRate,float maxSpeed,float mass,
+                std::array<GaitTransition,4>& transitions);
+};
+constexpr float startupDuration=6.2f;
+enum class StartupStage { Ignition, Systems, Hydraulics, Online };
 struct Controls { float throttle=0,turn=0,strafe=0; bool fire=false,missile=false,boost=false; };
 struct Player {
     Vec3 pos{0,0,105};
     float yaw=0,torso=0,pitch=0,speed=0,armor=110,shield=100,heat=0;
-    float maxArmor=110,maxShield=100,maxSpeed=22,damage=1;
-    float cooldown=0,missileCooldown=0,sinceHit=100,walk=0;
+    float maxArmor=110,maxShield=100,maxSpeed=13,damage=1;
+    float cooldown=0,missileCooldown=0,sinceHit=100;
+    float sideSpeed=0,turnRate=0,mass=65,turboPower=0;
+    Gait gait;
     int missiles=10,weapon=0;
-    bool overheated=false;
+    bool overheated=false,turboEngaged=false;
 };
 struct Enemy {
     int id=0,type=0;
     Vec3 pos;
     float yaw=0,armor=100,maxArmor=100,shield=45,maxShield=45,legs=65;
-    float cooldown=0,sinceHit=0,walk=0,flash=0,deathTime=0;
+    float cooldown=0,sinceHit=0,flash=0,deathTime=0;
+    Gait gait;
     bool alive=true,legKill=false;
 };
 struct Projectile { Vec3 pos,velocity; float life=0; int target=-1; bool friendly=false; float damage=0; };
@@ -58,10 +88,10 @@ struct Combat {
     std::vector<Beam> beams;
     std::vector<Particle> particles;
     std::vector<Pickup> pickups;
-    std::vector<Event> events;
+    std::vector<SoundEvent> events;
     Phase phase=Phase::Active;
     int mission=0,chassisIndex=0,kills=0,spawned=0,wave=0,salvage=0,target=-1;
-    float time=0,waveDelay=0,hitFlash=0,damageFlash=0,messageTime=0;
+    float time=0,waveDelay=0,hitFlash=0,damageFlash=0,messageTime=0,startupTime=0;
     std::string message;
     Vec3 extraction{0,0,-225};
     bool extractionOpen=false;
@@ -76,6 +106,11 @@ struct Combat {
     void explode(Vec3 pos,int count=32);
     void announce(const std::string& text,float seconds=4);
     Vec3 eye() const;
+    Vec3 cameraEye() const;
+    Vec3 cameraAim() const;
+    float cameraRoll() const;
+    bool ready() const { return startupTime>=startupDuration; }
+    StartupStage startupStage() const;
     Vec3 aim() const;
     float random(float low,float high);
 };
