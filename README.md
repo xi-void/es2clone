@@ -1,6 +1,6 @@
 # Earthsiege II: Resistance
 
-A **native Linux mech-combat game** written in C++17 with SDL2 and OpenGL. This is a playable, independently implemented recreation of the Earthsiege-style combat loop, with original procedural models, terrain, interface, and sound. It is a small game, not a port of the complete commercial campaign.
+A **native Linux mech-combat game** written in C++17 with SDL2 and OpenGL. This is a playable, independently implemented recreation of the Earthsiege-style combat loop, with procedural models, terrain, interface, and fallback sound, plus optional locally imported original audio. It is a small game, not a port of the complete commercial campaign.
 
 ## Run
 
@@ -20,7 +20,7 @@ The launcher builds the game and opens a native desktop window. To run the alrea
 
 No browser, web server, network connection, or original game files are required. Launch from a terminal in your graphical Linux desktop session. Both X11 and Wayland are supported through SDL. The window is resizable; **F11** toggles fullscreen.
 
-Build dependencies: a C++17 compiler, CMake 3.16+, pkg-config, SDL2, SDL2_ttf, and OpenGL development libraries. These were already available on the development machine. Runtime dependencies are SDL2, SDL2_ttf, the C++ runtime, and an OpenGL 2.1-compatible graphics driver. SDL2 compatibility implementations backed by SDL3 work too.
+Build dependencies: a C++17 compiler, CMake 3.16+, pkg-config, SDL2, SDL2_ttf, libsndfile 1.1+ (with MP3, FLAC and Vorbis codecs), Python 3, and OpenGL development libraries. These were already available on the development machine. Runtime dependencies are SDL2, SDL2_ttf, libsndfile, the C++ runtime, and an OpenGL 2.1-compatible graphics driver. SDL2 compatibility implementations backed by SDL3 work too.
 
 ## Play
 
@@ -57,16 +57,34 @@ Foot impacts, rendered leg motion, and cockpit suspension share one gait phase. 
 
 Turbo increases reactor output gradually, adds a turbine spool and sustained high-power hum, and drives stronger, faster hydraulic motion. Footstep intervals shorten as the HERC actually accelerates; impact samples retain their original pitch and duration. Releasing Shift produces a descending spool as the machine returns to cruise speed. Camera displacement stays within centimetres and leaves gun aim stable.
 
-An original procedural ambient score continues across menus, missions, and pauses. Press **F2** to adjust its volume independently from weapons, machinery, and interface sounds. Music leaves the lowest bass frequencies to the HERC and dips gently around impacts. All channels mix together through SDL with output headroom and a soft limiter. **M** toggles master mute. Settings persist between launches.
-
-Generate a 28-second audition of startup, walking, turbo, spool-down, and stopping:
+Music comes from your own soundtrack files. Put them in `assets/audio/music/`, or link the supplied folder:
 
 ```sh
-./build/audio_preview --output /tmp/mech-demo.wav
-./build/audio_preview --play --output /tmp/sdl-demo.wav
+python3 tools/import_music.py Earthsiege2RemasteredSoundtrack_MP3_320kbps
 ```
 
-`--play` uses the actual SDL audio callback and records its output. Add `--machinery-only` to mute other buses or `--chassis 1` for the Bastion (`0` Nomad, `2` Strider). The packaged archive also includes `./audio_preview`. No audio assets are downloaded. See [audio design and verification](docs/audio.md).
+Track `001_Power-Up Initiated.mp3` plays at the start of each level. The other tracks play during missions, with sequential/random selection, crossfades, warning ducking, and optional menu playback. WAV, FLAC, OGG/Vorbis and MP3 are supported by libsndfile. No replacement music is generated; an empty music folder is silent.
+
+Keep the original ISO in **`original/`** and import its effects with:
+
+```sh
+python3 tools/import_original_audio.py original/Earthsiege2_Freeware_HiRezStudios_1r0.iso \
+  --output imported/from-iso --map tools/original-audio-map.csv
+```
+
+ISO input requires `7z`; an extracted installation directory also works. The importer preserves the source and creates a detailed inventory. Verified mappings load original footsteps, engine, startup, weapons, impacts, explosions, lock and warning sounds. Unidentified turbo/hydraulic recordings remain unmapped, with procedural layers filling those gaps. See the [import workflow and format findings](docs/original-audio.md).
+
+Edit `assets/audio/audio.ini` for music mode, menu playback, crossfade, ducking, volumes and event mappings. Imported mappings are in ignored `assets/audio/local.ini`. Press **F2** for the existing music / weapons / machinery / interface sliders. Explicit INI volume values override saved pilot levels on launch; blank settings use the saved levels. **M** mutes every bus. Assets missing or failing to decode fall back safely.
+
+**`original/`, extracted resources, soundtrack files and local mappings stay out of Git and public packages.** Packages include the importer and procedural fallback, and accept local assets afterward.
+
+Audition the actual imported sounds and album through SDL:
+
+```sh
+./build/audio_preview --audio-dir assets/audio --play --output /tmp/sdl-demo.wav
+```
+
+The 28-second sequence uses the same simulation: startup, walk, turbo, spool-down, stop. Add `--machinery-only` or `--chassis 1` for the Bastion. Omit `--audio-dir` to check procedural fallback with no music. Captures containing imported audio are private local files. See [audio design and verification](docs/audio.md).
 
 ## Save data
 
@@ -123,13 +141,14 @@ The archive includes the game, audio audition tool, fonts, icon, and documentati
 - `src/simulation.*`: graphics-independent combat, movement, collision, AI, and mission rules.
 - `src/renderer.*`: procedural 3D models, terrain, cockpit HUD, menus, and font atlas.
 - `src/locomotion.cpp`: shared foot trajectories, contact transitions, and damped cockpit suspension.
-- `src/synthesis.*`: procedural impact/startup/turbo assets, reactor synthesis, music, and four-bus mixer.
+- `src/synthesis.*`: procedural fallback effects, reactor synthesis, and four-bus mixer.
+- `src/audio_assets.*`, `src/music_stream.*`: configuration, cached effects, decoders and bounded music streaming.
 - `src/audio.*`: SDL callback, device synchronization, and optional PCM capture.
 - `tools/audio_preview.cpp`: audition using the actual simulation and audio engine.
 - `src/main.cpp`: native window, input, fixed-step simulation, menu actions, and pilot saves.
 - `tests/`: simulation and native rendering/input integration tests.
 
-The simulation runs at 120 Hz independently of rendering. The renderer uses the OpenGL compatibility pipeline for broad support and a deliberately low-poly appearance. Audio uses no recordings or external assets.
+The simulation runs at 120 Hz independently of rendering. The renderer uses the OpenGL compatibility pipeline for broad support and a deliberately low-poly appearance. Audio supports local recordings and remains playable with procedural effects alone.
 
 ## Screenshots
 
@@ -139,6 +158,6 @@ The simulation runs at 120 Hz independently of rendering. The renderer uses the 
 
 ## Credits
 
-Inspired by [Earthsiege 2 by Dynamix/Sierra](https://www.sierragamers.com/earthsiege-2/). This project is an unofficial fan recreation; it includes no original game code, models, textures, music, or campaign data. Earthsiege names belong to their respective owners.
+Inspired by [Earthsiege 2 by Dynamix/Sierra](https://www.sierragamers.com/earthsiege-2/). This project is an unofficial fan recreation; the public source and package include no original game code, models, textures, recordings, or campaign data. Locally imported assets remain outside version control. Earthsiege names belong to their respective owners.
 
 Bundled Liberation Sans and Liberation Mono fonts are licensed under the SIL Open Font License. See `assets/fonts/LICENSE`.

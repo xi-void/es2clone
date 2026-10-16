@@ -15,11 +15,11 @@ using namespace siege;
 struct Options {
     bool smoke=false,mute=false;
     int frames=0;
-    std::string screenshot,scene="menu",saveDir;
+    std::string screenshot,scene="menu",saveDir,audioDir,audioConfig,audioCapture;
 };
 static void help() {
     std::cout<<"Earthsiege II: Resistance - native Linux mech combat\n\n"
-             <<"Usage: earthsiege [--mute] [--save-dir PATH]\n"
+             <<"Usage: earthsiege [--mute] [--save-dir PATH] [--audio-dir PATH] [--audio-config FILE] [--audio-capture FILE.wav]\n"
              <<"       earthsiege --smoke-test [--scene menu|hangar|startup|combat|pause|controls|audio|debrief|flow]\n"
              <<"                  [--frames N] [--screenshot image.ppm] [--save-dir PATH]\n\n"
              <<"W/S move; A/D turn; Q/E strafe; mouse aims torso; C centers torso\n"
@@ -60,6 +60,9 @@ int main(int argc,char** argv) {
             else if(arg=="--frames")options.frames=std::max(1,std::stoi(value()));
             else if(arg=="--screenshot")options.screenshot=value();
             else if(arg=="--scene")options.scene=value();
+            else if(arg=="--audio-capture")options.audioCapture=value();
+            else if(arg=="--audio-dir")options.audioDir=value();
+            else if(arg=="--audio-config")options.audioConfig=value();
             else if(arg=="--save-dir")options.saveDir=value();
             else throw std::runtime_error("Unknown argument: "+arg);
         } catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 2;}
@@ -89,9 +92,12 @@ int main(int argc,char** argv) {
     if(!fs::exists(assets/"fonts/Display.ttf"))assets=fs::current_path()/"assets";
     Renderer renderer;
     if(!renderer.init(assets.string())){renderer.destroy();SDL_GL_DeleteContext(context);SDL_DestroyWindow(window);TTF_Quit();SDL_Quit();return 1;}
+    fs::path audioRoot=options.audioDir.empty()?assets/"audio":fs::path(options.audioDir);
+    if(options.audioDir.empty()&&fs::exists(executable/"../assets/audio/audio.ini"))audioRoot=executable/"../assets/audio";
     Audio audio;
-    if(SDL_InitSubSystem(SDL_INIT_AUDIO)!=0||!audio.init())std::cerr<<"Audio unavailable; continuing without sound: "<<SDL_GetError()<<'\n';
-    UIState ui;if(!options.smoke)load(ui,options.saveDir);if(options.mute||options.smoke)ui.muted=true;audio.setMuted(ui.muted);audio.setVolumes(ui.volumes);audio.setSuspended(true);
+    if(SDL_InitSubSystem(SDL_INIT_AUDIO)!=0||!audio.init(audioRoot.string(),options.audioConfig))std::cerr<<"Audio unavailable; continuing without sound: "<<SDL_GetError()<<'\n';
+    UIState ui;if(!options.smoke)load(ui,options.saveDir);if(options.mute||(options.smoke&&options.audioCapture.empty()))ui.muted=true;ui.volumes=audio.configuredVolumes(ui.volumes);audio.setMuted(ui.muted);audio.setVolumes(ui.volumes);audio.setSuspended(true);
+    if(!options.audioCapture.empty())audio.startCapture(120);
     Combat game;game.reset();bool running=true,banked=false,mouseDown=false,rightDown=false;
     auto notify=[&](const std::string& message){ui.notice=message;ui.noticeTime=4;};
     auto persist=[&](){if(!save(ui,options.saveDir))notify("Could not save pilot data. Check the save directory.");};
@@ -102,7 +108,7 @@ int main(int argc,char** argv) {
         switch(action){
         case Action::Launch:case Action::Retry:launch();break;
         case Action::Next:ui.mission=(ui.mission+1)%3;launch();break;
-        case Action::Hangar:ui.screen=Screen::Hangar;capture(false);audio.reset();break;
+        case Action::Hangar:ui.screen=Screen::Hangar;capture(false);audio.reset();audio.play(Event::ReactorShutdown);break;
         case Action::Back:if(ui.screen==Screen::Controls||ui.screen==Screen::AudioSettings)ui.screen=ui.returnScreen;else ui.screen=Screen::Menu;break;
         case Action::Controls:ui.returnScreen=ui.screen;ui.screen=Screen::Controls;capture(false);break;
         case Action::AudioSettings:ui.returnScreen=ui.screen;ui.screen=Screen::AudioSettings;capture(false);break;
@@ -138,7 +144,7 @@ int main(int argc,char** argv) {
     uint64_t previous=SDL_GetPerformanceCounter();double frequency=double(SDL_GetPerformanceFrequency());int frame=0,exitCode=0;float accumulated=0;
     float pausedTime=0;
     while(running){
-        uint64_t now=SDL_GetPerformanceCounter();float dt=options.smoke?1.0f/60:std::min(float(double(now-previous)/frequency),0.1f);previous=now;
+        uint64_t now=SDL_GetPerformanceCounter();float dt=options.smoke&&options.audioCapture.empty()?1.0f/60:std::min(float(double(now-previous)/frequency),0.1f);previous=now;
         ui.time+=dt;ui.noticeTime=std::max(0.0f,ui.noticeTime-dt);
         if(options.smoke&&options.scene=="flow") {
             auto check=[&](bool result,const char* name){if(!result){std::cerr<<"UI flow FAIL: "<<name<<'\n';exitCode=1;running=false;}};
@@ -199,26 +205,43 @@ int main(int argc,char** argv) {
             input.throttle=float(keys[SDL_SCANCODE_W])-keys[SDL_SCANCODE_S];input.turn=float(keys[SDL_SCANCODE_D])-keys[SDL_SCANCODE_A];input.strafe=float(keys[SDL_SCANCODE_E])-keys[SDL_SCANCODE_Q];input.boost=keys[SDL_SCANCODE_LSHIFT]||keys[SDL_SCANCODE_RSHIFT];input.fire=mouseDown||keys[SDL_SCANCODE_SPACE];input.missile=rightDown;
             game.player.torso=clamp(game.player.torso+(float(keys[SDL_SCANCODE_RIGHT])-keys[SDL_SCANCODE_LEFT])*dt,-1.4f,1.4f);
             game.player.pitch=clamp(game.player.pitch+(float(keys[SDL_SCANCODE_UP])-keys[SDL_SCANCODE_DOWN])*dt*0.65f,-0.65f,0.5f);
-            if(options.smoke){input.throttle=frame<100?0.5f:0;input.fire=frame%70<20;}
+            if(options.smoke){input.throttle=frame<100?0.5f:0;input.fire=frame%70<20;
+                if(!options.audioCapture.empty()){
+                    float t=game.startupTime+game.time;input.throttle=t>=7&&t<19?1:0;input.boost=t>=11&&t<16;input.turn=t>=10?0.4f:0;
+                }
+            }
             accumulated+=dt;
             while(accumulated>=1.0f/120){game.update(1.0f/120,input);accumulated-=1.0f/120;}
             if(game.phase!=Phase::Active){ui.screen=Screen::Debrief;capture(false);if(game.phase==Phase::Won&&!banked){ui.bank+=game.salvage;ui.completed=std::max(ui.completed,ui.mission+1);banked=true;persist();}}
         } else {accumulated=0;}
         audio.setSuspended(ui.screen!=Screen::Playing);
+        bool missionScreen=ui.screen==Screen::Playing||ui.screen==Screen::Paused||
+            ((ui.screen==Screen::Controls||ui.screen==Screen::AudioSettings)&&ui.returnScreen==Screen::Paused);
+        audio.setMusicActive(missionScreen?game.ready():audio.assetInfo().config.menuMusic);
         audio.setDrive({clamp(game.startupTime/2.1f,0,1),clamp(game.player.gait.speed/game.player.maxSpeed,0,1.6f),std::abs(game.player.gait.load),game.player.mass,game.player.turboPower});
         if(simulated)for(const auto& event:game.events)audio.play(event);
         game.events.clear();
         SDL_GL_GetDrawableSize(window,&width,&height);renderer.render(width,height,game,ui);
         ++frame;
+        if(options.smoke&&!options.audioCapture.empty()&&ui.time>=21)running=false;
         if(options.frames>0&&frame>=options.frames){
             if(!options.screenshot.empty()&&!renderer.screenshot(options.screenshot,width,height)){std::cerr<<"Screenshot write failed\n";exitCode=1;}
             GLenum error=glGetError();if(error!=GL_NO_ERROR){std::cerr<<"OpenGL error: "<<error<<'\n';exitCode=1;}
             running=false;
         }
         SDL_GL_SwapWindow(window);
+        if(options.smoke&&!options.audioCapture.empty()){
+            double spent=double(SDL_GetPerformanceCounter()-now)/frequency;
+            if(spent<1.0/60)SDL_Delay(Uint32((1.0/60-spent)*1000));
+        }
         if(!options.smoke&&SDL_GL_GetSwapInterval()==0)SDL_Delay(8);
     }
     if(!options.smoke)persist();
+    if(!options.audioCapture.empty()){
+        auto stats=audio.statistics();bool saved=audio.saveCapture(options.audioCapture);
+        std::cout<<"In-game audio: "<<stats.assetEvents<<" file events, "<<stats.fallbackEvents<<" fallback events, "<<stats.musicFrames<<" music frames, "<<stats.startupCues<<" boot cues, peak "<<stats.peak<<", finite "<<stats.finite<<", captured "<<saved<<'\n';
+        if(!saved||!stats.finite||!stats.audibleFrames)exitCode=1;
+    }
     capture(false);audio.shutdown();renderer.destroy();SDL_GL_DeleteContext(context);SDL_DestroyWindow(window);TTF_Quit();SDL_Quit();
     if(options.smoke)std::cout<<"Native render smoke test: "<<(exitCode==0?"PASS":"FAIL")<<" ("<<frame<<" frames, "<<options.scene<<")\n";
     return exitCode;

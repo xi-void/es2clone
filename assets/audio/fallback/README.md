@@ -1,0 +1,1 @@
+Optional local replacement effects use `<event>.wav` filenames here, e.g. `foot_left.wav`. When neither an explicit mapping nor this file is available, the existing procedural machinery/weapon/interface effect plays. Music has no generated fallback. Audio files in this directory are ignored by Git and excluded from packages.

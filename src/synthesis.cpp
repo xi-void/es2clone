@@ -1,4 +1,6 @@
 #include "synthesis.hpp"
+#include "audio_assets.hpp"
+#include "music_stream.hpp"
 #include <fstream>
 
 namespace siege {
@@ -16,7 +18,7 @@ bool hydraulicEvent(Event e){return e==Event::HydraulicLeft||e==Event::Hydraulic
 bool weightedEvent(Event e){return footEvent(e)||hydraulicEvent(e)||e==Event::ReactorIgnition||e==Event::MechanicalActivate;}
 AudioBus busFor(Event e) {
     if(e==Event::Laser||e==Event::Cannon||e==Event::Missile||e==Event::Impact||e==Event::Explosion)return AudioBus::Weapons;
-    if(e==Event::Lock||e==Event::Wave||e==Event::Win||e==Event::Lose||e==Event::Overheat)return AudioBus::Interface;
+    if(e==Event::Lock||e==Event::Wave||e==Event::Win||e==Event::Lose||e==Event::Overheat||e==Event::DamageWarning)return AudioBus::Interface;
     return AudioBus::Machinery;
 }
 
@@ -29,7 +31,7 @@ std::vector<float> generate(Event event,int weight,int variant) {
     if(event==Event::SystemInit)duration=1.45f;
     if(event==Event::MechanicalActivate)duration=1.65f;
     if(event==Event::ReactorReady)duration=1;
-    if(event==Event::TurboEngage||event==Event::TurboRelease)duration=1.4f;
+    if(event==Event::TurboEngage||event==Event::TurboRelease||event==Event::ReactorShutdown)duration=1.4f;
     if(event==Event::Explosion||event==Event::Win||event==Event::Lose)duration=1.15f;
     std::vector<float> result(size_t(duration*audioRate));
     Noise noise{uint32_t(2624+int(event)*313+weight*71+variant*13)};
@@ -70,7 +72,7 @@ std::vector<float> generate(Event event,int weight,int variant) {
         } else if(event==Event::ReactorReady) {
             sample=std::sin(2*pi*62*t)*envelope(t,0.025f,0.3f)*0.12f;
             if(t>0.12f)sample+=(noise.mid-noise.low)*envelope(t-0.12f,0.004f,0.08f)*0.14f;
-        } else if(event==Event::TurboEngage||event==Event::TurboRelease) {
+        } else if(event==Event::TurboEngage||event==Event::TurboRelease||event==Event::ReactorShutdown) {
             bool engage=event==Event::TurboEngage;
             float e=smooth(t/0.10f)*(1-smooth((t-0.9f)/0.5f));
             float phase=engage?(95*t+115*t*t):(420*t-100*t*t);
@@ -98,7 +100,7 @@ AudioMixer::AudioMixer() {
 }
 void AudioMixer::reset() {
     voices={};drive={};power=motion=load=turbo=pressure=0;
-    reactorPhase=servoPhase=turbinePhase=0;variation=0;stats={};
+    reactorPhase=servoPhase=turbinePhase=0;variation=0;stats={};loopPositions={};selections={};duck=1;duckHold=0;limiter=1;
 }
 void AudioMixer::setVolumes(AudioVolumes value){for(size_t i=0;i<volumes.size();++i)volumes[i]=clamp(value[i],0,1);}
 size_t AudioMixer::sampleBytes() const {size_t bytes=0;for(const auto& clip:clips)bytes+=clip.size()*sizeof(float);return bytes;}
@@ -107,17 +109,36 @@ void AudioMixer::trigger(const SoundEvent& event) {
     if(event.type==Event::Count||event.strength<=0)return;
     int weight=weightedEvent(event.type)?(event.mass<50?0:event.mass>85?2:1):0;
     int variant=footEvent(event.type)?int((variation++/2)%2):hydraulicEvent(event.type)&&event.activity>0.85f?1:0;
-    const auto& clip=clips[size_t(int(event.type)*6+weight*2+variant)];
-    if(clip.empty())return;
+    const std::vector<float>* clip=&clips[size_t(int(event.type)*6+weight*2+variant)];
+    int channels=1;AudioBus bus=busFor(event.type);float mappedGain=1;bool imported=false;
+    bool boot=assets&&assets->startup&&event.type==Event::ReactorIgnition;
+    if(assets){
+        const auto& choices=assets->events[int(event.type)];
+        // Track one is the user's complete boot sequence. Avoid doubling it with
+        // the old generated startup cues; explicitly mapped cues remain available.
+        if(assets->startup&&choices.empty()&&(event.type==Event::SystemInit||event.type==Event::MechanicalActivate||event.type==Event::ReactorReady))return;
+        if(boot){clip=&assets->startup->samples;channels=2;bus=AudioBus::Music;imported=true;++stats.startupCues;}
+        else if(!choices.empty()){
+            clip=&choices[selections[int(event.type)]++%choices.size()]->samples;channels=2;imported=true;
+        }
+        mappedGain=assets->config.gains[int(event.type)];
+    }
+    if(clip->empty())return;
     Voice* slot=&voices[0];float least=1e9f;
     for(auto& voice:voices) {
         if(!voice.clip){slot=&voice;break;}
-        float remaining=float(voice.clip->size())-voice.position;
+        float remaining=(float(voice.clip->size())-voice.position)/voice.channels;
         if(remaining<least){least=remaining;slot=&voice;}
     }
-    float pan=clamp(event.pan,-0.9f,0.9f),gain=clamp(event.strength,0,1.4f);
-    *slot={&clip,0,gain*std::sqrt((1-pan)*0.5f),gain*std::sqrt((1+pan)*0.5f),busFor(event.type)};
-    if(footEvent(event.type)||event.type==Event::Explosion)duck=0.72f;
+    float pan=clamp(event.pan,-0.9f,0.9f),gain=clamp(event.strength,0,1.4f)*mappedGain;
+    float scale=channels==2?1.0f:0.5f;
+    *slot={clip,0,gain*std::sqrt((1-pan)*scale),gain*std::sqrt((1+pan)*scale),bus,channels,bus!=AudioBus::Interface&&event.type!=Event::ReactorShutdown};
+    if(imported)++stats.assetEvents;else ++stats.fallbackEvents;
+    if(footEvent(event.type)||event.type==Event::Explosion)duck=std::min(duck,0.72f);
+    if(event.type==Event::Overheat||event.type==Event::DamageWarning||event.type==Event::Lose||event.type==Event::Wave){
+        duckHold=std::max(duckHold,std::max(2.0f,float(clip->size())/channels/audioRate));
+    }
+
 }
 float AudioMixer::oscillator(float& phase,float frequency) noexcept {
     phase+=frequency*float(sine.size())/audioRate;
@@ -146,42 +167,48 @@ void AudioMixer::render(float* stereo,int frames) noexcept {
             float pump=pressure*(0.018f+0.03f*load)*motion*power;
             float turbine=oscillator(turbinePhase,(180+turbo*250)*weight)*0.028f*turbo*power;
             float resonance=pressure*0.065f*turbo*power;
-            left=right=(reactor+servo+pump+turbine+resonance)*levels[int(AudioBus::Machinery)]*worldVolume;
+            float loopLeft=0,loopRight=0;
+            float* layers[]={&reactor,&servo,&turbine};
+            float gains[]={0.20f*power,0.18f*motion*power,0.24f*turbo*power};
+            for(int i=0;i<3;++i)if(assets&&assets->loops[i]){
+                const auto& samples=assets->loops[i]->samples;size_t count=samples.size()/2;
+                size_t at=loopPositions[i]%count;
+                // Short wrap crossfade prevents a hard edge without retuning the recording.
+                size_t fade=std::min<size_t>(240,count/4);float l=samples[at*2],r=samples[at*2+1];
+                if(fade&&at>=count-fade){float t=float(at-(count-fade))/fade;size_t first=at-(count-fade);l=l*(1-t)+samples[first*2]*t;r=r*(1-t)+samples[first*2+1]*t;}
+                loopPositions[i]=at+1==count?fade:at+1;
+                loopLeft+=l*gains[i];loopRight+=r*gains[i];*layers[i]=0;
+                if(i==1)pump=0;
+            }
+            float gain=levels[int(AudioBus::Machinery)]*worldVolume;
+            left=(reactor+servo+pump+turbine+resonance+loopLeft)*gain;
+            right=(reactor+servo+pump+turbine+resonance+loopRight)*gain;
         }
+        duckHold=std::max(0.0f,duckHold-1.0f/audioRate);
+        float duckTarget=duckHold>0?(assets?assets->config.warningDuck:0.32f):1.0f;
+        follow(duck,duckTarget,duckTarget<duck?0.002f:0.000045f);
         for(auto& v:voices)if(v.clip) {
-                if(suspended&&worldVolume<=0&&v.bus!=AudioBus::Interface)continue;
-                size_t at=size_t(v.position);
-                if(at>=v.clip->size()){v.clip=nullptr;continue;}
-                float sample=(*v.clip)[at];v.position+=1;
-                sample*=levels[int(v.bus)]*(v.bus==AudioBus::Interface?1:worldVolume);
-                left+=sample*v.left;right+=sample*v.right;
+            if(suspended&&worldVolume<=0&&v.world)continue;
+            size_t at=size_t(v.position);
+            if(at+size_t(v.channels)>v.clip->size()){v.clip=nullptr;continue;}
+            float gain=levels[int(v.bus)]*(v.world?worldVolume:1);
+            if(v.bus==AudioBus::Music)gain*=duck;
+            left+=(*v.clip)[at]*v.left*gain;
+            right+=(*v.clip)[at+(v.channels==2?1:0)]*v.right*gain;
+            v.position+=float(v.channels);
         }
-        // Original 64-second ambient score. Two banks crossfade chords without
-        // resetting oscillators; sparse tuned metal notes add a slow pulse.
-        // Music stays above the 30-100 Hz machinery region. No streaming/I/O.
-        constexpr float chords[4][3]={{174.614f,207.652f,261.626f},{155.563f,207.652f,233.082f},
-                                      {174.614f,220.000f,261.626f},{155.563f,195.998f,261.626f}};
-        constexpr float notes[]={349.228f,415.305f,523.251f,622.254f};
-        constexpr int pattern[]={0,-1,-1,2,-1,-1,1,-1,0,-1,-1,-1,3,-1,2,-1};
-        musicClock+=1.0/audioRate;
-        int chord=int(musicClock/16),step=int(musicClock*1.5);
-        float fade=smooth(float(musicClock-chord*16)/16);
-        float padLeft=0,padRight=0;
-        for(int bank=0;bank<2;++bank)for(int tone=0;tone<3;++tone){
-            int index=chord+((chord%2==bank)?0:1);
-            float gain=chord%2==bank?1-fade:fade;
-            float sample=oscillator(musicPhases[size_t(bank*3+tone)],chords[index%4][tone])*gain*0.025f;
-            padLeft+=sample*(tone==2?0.7f:1);padRight+=sample*(tone==0?0.7f:1);
+        follow(musicLevel,musicActive?1.0f:0.0f,0.0002f);
+        if(music&&(musicActive||musicLevel>1e-5f)){
+            float l=0,r=0;if(music->pop(l,r))++stats.musicFrames;
+            float gain=levels[int(AudioBus::Music)]*duck*musicLevel;
+            left+=l*gain;right+=r*gain;
         }
-        if(step!=musicStep){musicStep=step;int note=pattern[step%16];if(note>=0){musicNoteFrequency=notes[(note+chord)%4];musicNoteLevel=0.013f;musicNotePhase=musicNoteHarmonic=0;}}
-        musicNoteLevel*=0.99988f;
-        float note=(oscillator(musicNotePhase,musicNoteFrequency)+0.25f*oscillator(musicNoteHarmonic,musicNoteFrequency*2.71f))*musicNoteLevel;
-        float pulse=0.83f+0.17f*oscillator(musicPulse,0.09375f);
-        duck+=(1-duck)*0.000045f;
-        float musicGain=levels[int(AudioBus::Music)]*duck;
-        left+=(padLeft*pulse+note)*musicGain;right+=(padRight*pulse+note*0.8f)*musicGain;
-        left=0.98f*left/(1+std::abs(left))*volume;
-        right=0.98f*right/(1+std::abs(right))*volume;
+        // Linked stereo limiter: unity gain below the ceiling, so original
+        // recordings retain their timbre. Instant attack, gentle release.
+        float peak=std::max(std::abs(left),std::abs(right));
+        float limit=peak>0.97f?0.97f/peak:1.0f;
+        if(limit<limiter)limiter=limit;else follow(limiter,limit,0.00005f);
+        left*=limiter*volume;right*=limiter*volume;
         stereo[frame*2]=left;stereo[frame*2+1]=right;
         ++stats.frames;if(std::abs(left)+std::abs(right)>1e-6f)++stats.audibleFrames;
         stats.peak=std::max(stats.peak,std::max(std::abs(left),std::abs(right)));

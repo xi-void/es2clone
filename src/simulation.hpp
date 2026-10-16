@@ -33,7 +33,7 @@ extern const Mission missions[3];
 enum class Phase { Active, Won, Lost };
 enum class Event { Laser, Cannon, Missile, Impact, Explosion, Lock, Wave, Win, Lose, Overheat,
     FootLeft, FootRight, HydraulicLeft, HydraulicRight, ReactorIgnition, SystemInit, MechanicalActivate, ReactorReady,
-    TurboEngage, TurboRelease, Count };
+    TurboEngage, TurboRelease, ReactorShutdown, DamageWarning, Count };
 struct SoundEvent {
     Event type;
     float strength=1,pan=0,mass=65,activity=0;

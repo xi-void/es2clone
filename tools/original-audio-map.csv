@@ -1,0 +1,17 @@
+event,resource,evidence
+foot_left,VOL/SIMSOUND.VOL/hmi/FOOT2.WAV,FOOT2 identifier in original SOUNDS.STR; same original recording panned on actual left contact
+foot_right,VOL/SIMSOUND.VOL/hmi/FOOT2.WAV,FOOT2 identifier in original SOUNDS.STR; same original recording panned on actual right contact
+laser,VOL/SIMSOUND.VOL/hmi/LASER1.WAV,LASER1 identifier in original SOUNDS.STR
+cannon,VOL/SIMSOUND.VOL/hmi/BACANN4.WAV,BACANN4 cannon identifier in original SOUNDS.STR
+missile,VOL/SIMSOUND.VOL/hmi/MISSLE.WAV,MISSLE launch identifier in original SOUNDS.STR; MISSIN retained unmapped
+impact,VOL/SIMSOUND.VOL/hmi/IMPACTS2.WAV,IMPACTS2 identifier in original SOUNDS.STR
+impact,VOL/SIMSOUND.VOL/hmi/IMPACTS3.WAV,IMPACTS3 identifier in original SOUNDS.STR
+impact,VOL/SIMSOUND.VOL/hmi/IMPACTS5.WAV,IMPACTS5 identifier in original SOUNDS.STR
+explosion,VOL/SIMSOUND.VOL/hmi/EXPLO1D.WAV,EXPLO1D identifier in original SOUNDS.STR
+explosion,VOL/SIMSOUND.VOL/hmi/EXPLO2.WAV,EXPLO2 identifier in original SOUNDS.STR
+explosion,VOL/SIMSOUND.VOL/hmi/EXPLO3.WAV,EXPLO3 identifier in original SOUNDS.STR
+lock,VOL/SIMSOUND.VOL/hmi/TRGLOC.WAV,TRGLOC target lock identifier in original SOUNDS.STR
+reactor_ignition,VOL/SIMSOUND.VOL/hmi/START3.WAV,START3 startup identifier in original SOUNDS.STR; remastered boot cue takes precedence when supplied
+loop.reactor,VOL/SIMSOUND.VOL/hmi/HERCENG1.WAV,HERCENG1 engine identifier in original SOUNDS.STR
+damage_warning,VOL/SIMSOUND.VOL/hmi/WARN1.WAV,WARN1 generic warning identifier in SOUNDS.STR; assigned to clone low-armor warning without claiming a specific original spoken message
+overheat,VOL/SIMSOUND.VOL/hmi/WRNWOOP2.WAV,WRNWOOP2 warning whoop identifier in SOUNDS.STR; generic alert for clone overheating without claiming original overheat-specific speech

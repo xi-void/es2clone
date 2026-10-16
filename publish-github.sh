@@ -32,7 +32,10 @@ if ! git diff --cached --quiet; then
     exit 1
 fi
 
+python3 tools/check_public_files.py
+
 git add -- .gitignore CMakeLists.txt README.md run.sh package.sh publish-github.sh src tests tools assets docs
+python3 tools/check_public_files.py
 if ! git diff --cached --quiet; then
     git commit -m "Save playable native Linux Earthsiege prototype"
 fi

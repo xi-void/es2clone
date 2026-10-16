@@ -123,10 +123,12 @@ void Combat::damageEnemy(int index,float damage,bool legs) {
 }
 void Combat::damagePlayer(float amount) {
     if(phase!=Phase::Active) return;
+    float previousArmor=player.armor;
     player.sinceHit=0;
     float shieldDamage=std::min(player.shield,amount);
     player.shield-=shieldDamage; player.armor=std::max(0.0f,player.armor-(amount-shieldDamage));
     damageFlash=0.45f; events.push_back(Event::Impact);
+    if(previousArmor>=player.maxArmor*0.25f&&player.armor>0&&player.armor<player.maxArmor*0.25f)events.push_back(Event::DamageWarning);
     if(player.armor<=0) { phase=Phase::Lost; events.push_back(Event::Lose); announce("HERC LOST // Signal terminated.",100); }
 }
 void Combat::selectTarget() {

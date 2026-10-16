@@ -10,13 +10,17 @@ enum class AudioBus { Music, Weapons, Machinery, Interface, Count };
 using AudioVolumes=std::array<float,4>;
 constexpr AudioVolumes defaultVolumes{0.22f,0.8f,1.0f,0.55f};
 struct DriveSound { float power=0,speed=0,load=0,mass=65,turbo=0; };
-struct MixerStats { uint64_t frames=0,audibleFrames=0; float peak=0; bool finite=true; };
+struct MixerStats { uint64_t frames=0,audibleFrames=0,assetEvents=0,fallbackEvents=0,musicFrames=0,startupCues=0; float peak=0; bool finite=true; };
 
+class AudioAssets;
+class MusicStream;
 // Assets are generated once. The callback mixes bounded voices without allocations.
 class AudioMixer {
 public:
     AudioMixer();
     void trigger(const SoundEvent& event);
+    void configure(const AudioAssets* value,MusicStream* stream=nullptr){assets=value;music=stream;}
+    void setMusicActive(bool value){musicActive=value;}
     void render(float* stereo,int frames) noexcept;
     void reset();
     void setDrive(DriveSound value) { drive=value; }
@@ -28,7 +32,7 @@ public:
     size_t sampleBytes() const;
     int activeVoices() const;
 private:
-    struct Voice { const std::vector<float>* clip=nullptr; float position=0,left=0,right=0; AudioBus bus=AudioBus::Machinery; };
+    struct Voice { const std::vector<float>* clip=nullptr; float position=0,left=0,right=0; AudioBus bus=AudioBus::Machinery; int channels=1; bool world=true; };
     std::array<std::vector<float>,int(Event::Count)*6> clips;
     std::array<Voice,32> voices{};
     std::array<float,2048> sine{};
@@ -36,10 +40,12 @@ private:
     DriveSound drive;
     MixerStats stats;
     float reactorPhase=0,servoPhase=0,turbinePhase=0,power=0,motion=0,load=0,turbo=0,volume=0,worldVolume=1,pressure=0;
-    std::array<float,6> musicPhases{};
-    float musicPulse=0,musicNotePhase=0,musicNoteHarmonic=0,musicNoteLevel=0,musicNoteFrequency=349.228f,duck=1;
-    int musicStep=-1;
-    double musicClock=0;
+    const AudioAssets* assets=nullptr;
+    MusicStream* music=nullptr;
+    std::array<size_t,3> loopPositions{};
+    std::array<unsigned,int(Event::Count)> selections{};
+    float duck=1,duckHold=0,musicLevel=0,limiter=1;
+    bool musicActive=false;
     bool muted=false,suspended=false;
     unsigned variation=0;
     uint32_t random=71623;

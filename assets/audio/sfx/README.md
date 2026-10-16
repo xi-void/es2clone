@@ -1,0 +1,1 @@
+Original effects imported from your local EarthSiege 2 copy belong here. Run `tools/import_original_audio.py` with the reviewed mapping CSV; see `docs/original-audio.md`. WAV, FLAC, OGG/Vorbis and MP3 are decoded without changing pitch. WAV PCM is the preferred lossless format for original effects. Recordings and local mappings are ignored by Git and excluded from packages.

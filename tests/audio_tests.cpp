@@ -36,7 +36,7 @@ int main(){
     expect(normal==turbo,"turbo never changes impact sample playback speed or pitch");
     auto hydraulic=eventAudio(mixer,{Event::HydraulicLeft,1,-0.3f,65,0.5f}),fastHydraulic=eventAudio(mixer,{Event::HydraulicLeft,1,-0.3f,65,1.6f});
     expect(hydraulic!=fastHydraulic&&energy(fastHydraulic)>energy(hydraulic)*0.8,"high-speed hydraulics use shorter, stronger independently synthesized motion");
-    for(int bus=0;bus<4;++bus){
+    for(int bus=1;bus<4;++bus){
         const Event events[]={Event::Lock,Event::Cannon,Event::FootLeft,Event::Lock};
         isolate(mixer,AudioBus(bus));if(bus)mixer.trigger(events[bus]);
         auto audible=render(mixer,0.2f);expect(energy(audible)>1e-6,"each bus independently produces output");
@@ -49,7 +49,7 @@ int main(){
     render(reference,1);render(continuity,1);continuity.setSuspended(true);continuity.reset();
     expect(render(reference,2)==render(continuity,2),"music remains sample-continuous across pause and mission reset");
     continuity.setMuted(true);render(continuity,0.1f);expect(peak(render(continuity,0.1f))==0,"master mute fades completely to silence");
-    continuity.setMuted(false);expect(energy(render(continuity,0.2f))>1e-5,"unmuting restores the continuing soundtrack");
+    continuity.setMuted(false);expect(peak(render(continuity,0.2f))==0,"missing soundtrack stays silent; no generated replacement music");
     isolate(mixer,AudioBus::Machinery);mixer.setDrive({1,0,0,65,0});render(mixer,1);auto idle=render(mixer,1);
     mixer.setDrive({1,1.6f,1,65,1});render(mixer,1);auto highPower=render(mixer,1);
     expect(energy(highPower)>energy(idle)*1.5,"high-power turbine, servo and resonance layers differ from idle reactor hum");
@@ -75,8 +75,8 @@ int main(){
     auto stats=audio.statistics();expect(stats.finite&&stats.audibleFrames>10000&&stats.peak>0.1f&&stats.peak<0.98f,"actual SDL callback contains finite audible mechanical PCM");
     audio.reset();audio.setVolumes({1,1,1,1});audio.setDrive({1,1.5f,0.8f,65,1});audio.play(Event::TurboEngage);
     audio.play(Event::Cannon);audio.play(Event::Lock);audio.play({Event::FootRight,1,0.3f});audio.clearStatistics();
-    expect(waitFrames(audio,12000),"SDL simultaneously plays soundtrack, weapon, interface and turbo layers");stats=audio.statistics();
-    expect(stats.finite&&stats.audibleFrames==stats.frames&&stats.peak<0.98f,"all SDL channels coexist without silent gaps or clipping");
+    expect(waitFrames(audio,12000),"SDL simultaneously plays weapon, interface and turbo layers");stats=audio.statistics();
+    expect(stats.finite&&stats.audibleFrames>stats.frames*0.98&&stats.peak<0.98f,"SDL effects and machinery are audible without clipping");
     audio.setMuted(true);waitFrames(audio,2400);audio.clearStatistics();waitFrames(audio,2400);
     expect(audio.statistics().peak==0,"SDL master mute reaches digital silence");
     audio.shutdown();SDL_Quit();

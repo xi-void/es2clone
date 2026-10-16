@@ -2,7 +2,10 @@
 #include <cstring>
 
 namespace siege {
-bool Audio::init() {
+bool Audio::init(const std::string& directory,const std::string& config) {
+    if(!directory.empty())assets.load(directory,config);
+    mixer.configure(&assets,&music);
+    music.start(assets.playlist,assets.config.random,assets.config.crossfade);
     SDL_AudioSpec wanted{},actual{};
     wanted.freq=audioRate;wanted.format=AUDIO_F32SYS;wanted.channels=2;wanted.samples=512;
     wanted.callback=callback;wanted.userdata=this;
@@ -11,7 +14,9 @@ bool Audio::init() {
     if(device)SDL_PauseAudioDevice(device,0);
     return device!=0;
 }
-void Audio::shutdown(){if(device)SDL_CloseAudioDevice(device);device=0;}
+void Audio::shutdown(){if(device)SDL_CloseAudioDevice(device);device=0;music.stop();}
+AudioVolumes Audio::configuredVolumes(AudioVolumes saved) const {for(int i=0;i<4;++i)if(assets.config.overrides[i]>=0)saved[i]=assets.config.overrides[i];return saved;}
+void Audio::setMusicActive(bool value){if(!device)return;SDL_LockAudioDevice(device);mixer.setMusicActive(value);SDL_UnlockAudioDevice(device);}
 void Audio::play(const SoundEvent& event){if(!device)return;SDL_LockAudioDevice(device);mixer.trigger(event);SDL_UnlockAudioDevice(device);}
 void Audio::reset(){if(!device)return;SDL_LockAudioDevice(device);mixer.reset();SDL_UnlockAudioDevice(device);}
 void Audio::setMuted(bool value){if(!device)return;SDL_LockAudioDevice(device);mixer.setMuted(value);SDL_UnlockAudioDevice(device);}
