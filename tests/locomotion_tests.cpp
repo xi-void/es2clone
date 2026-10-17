@@ -54,7 +54,7 @@ int main(){
     ready(game);game.player.pos={-130,terrainHeight(-130,-110),-110};tick(game,9,{1});
     auto contacts=game.player.gait.contacts;tick(game,4,{1});
     expect(game.player.gait.contacts==contacts&&game.player.gait.speed<0.12f,"walking into a solid wall does not play phantom footsteps");
-    ready(game);game.player.pos.z=-310;tick(game,7,{1});contacts=game.player.gait.contacts;tick(game,4,{1});
+    ready(game);game.player.pos.z=-battlefieldLimit;tick(game,7,{1});contacts=game.player.gait.contacts;tick(game,4,{1});
     expect(game.player.gait.contacts==contacts,"world boundary stops cadence after settling");
     Combat heavy,light;ready(heavy,1);ready(light,2);tick(heavy,1,{1});tick(light,1,{1});
     expect(light.player.speed>heavy.player.speed*2,"chassis mass governs acceleration");

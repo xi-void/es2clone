@@ -86,10 +86,16 @@ int main(int argc,char** argv){
         AudioAssets original;original.load(argv[1]);
         expect(original.startup&&original.playlist.size()==9,"supplied remaster boot and nine background tracks decode");
         expect(!original.events[int(Event::FootLeft)].empty()&&original.loops[0],"ISO footstep and engine loaded");
+        expect(!original.events[int(Event::EnemyDestroyed)].empty()&&!original.events[int(Event::EnemyDisabled)].empty(),"both verified computer kill recordings load");
         Audio actual;expect(actual.init(argv[1]),"SDL opens original assets");actual.setMusicActive(true);actual.setDrive({1,1,0.5f,65,0.8f});
         for(Event event:{Event::FootLeft,Event::FootRight,Event::Laser,Event::Cannon,Event::Missile,Event::Explosion,Event::Lock})actual.play(event);
         SDL_Delay(400);auto originalStats=actual.statistics();
         expect(originalStats.assetEvents==7&&originalStats.musicFrames>0&&originalStats.audibleFrames>10000&&originalStats.finite,"seven original game effects and supplied MP3 reach SDL callback");actual.shutdown();
+        for(auto event:{Event::EnemyDestroyed,Event::EnemyDisabled}) {
+            Audio voice;expect(voice.init(argv[1]),"SDL opens for kill speech");voice.setVolumes({0,0,0,1});voice.play(event);SDL_Delay(500);
+            auto stats=voice.statistics();
+            expect(stats.assetEvents==1&&stats.fallbackEvents==0&&stats.audibleFrames>1000&&stats.finite&&stats.peak<1,"original kill speech reaches the SDL callback without clipping");voice.shutdown();
+        }
     }
     fs::remove_all(root);SDL_Quit();std::cout<<"PASS: "<<checks<<" asset/stream/SDL checks\n";
 }

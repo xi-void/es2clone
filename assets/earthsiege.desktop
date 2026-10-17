@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=Earthsiege II: Resistance
-Comment=Pilot a HERC in a native 3D mech combat game
+Name=OpenEarthSiege 2
+Comment=Native EarthSiege 2 compatibility prototype
 Exec=earthsiege
 Icon=earthsiege
 Terminal=false

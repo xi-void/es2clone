@@ -15,3 +15,6 @@ reactor_ignition,VOL/SIMSOUND.VOL/hmi/START3.WAV,START3 startup identifier in or
 loop.reactor,VOL/SIMSOUND.VOL/hmi/HERCENG1.WAV,HERCENG1 engine identifier in original SOUNDS.STR
 damage_warning,VOL/SIMSOUND.VOL/hmi/WARN1.WAV,WARN1 generic warning identifier in SOUNDS.STR; assigned to clone low-armor warning without claiming a specific original spoken message
 overheat,VOL/SIMSOUND.VOL/hmi/WRNWOOP2.WAV,WRNWOOP2 warning whoop identifier in SOUNDS.STR; generic alert for clone overheating without claiming original overheat-specific speech
+turbo_engage,VOL/SIMSOUND.VOL/hmi/THROTL.WAV,Verified DBSIM.EXE TURBO_POD vtable 0x498bec -> method 0x40f1f0; activation at 0x40f244 calls sound 44; SOUNDS.STR entry 44 is throtl.wav
+enemy_destroyed,VOL/SIMVOICE.VOL/SIMVOICE/CVM_0050.WAV,SYSTEM.STR message 46 ENEMY TARGET DESTROYED has voice byte 50; DBSIM.EXE 0x434fa2 copies metadata[7] to message+0x2c; 0x436ca4 formats it as CVM_00xx
+enemy_disabled,VOL/SIMVOICE.VOL/SIMVOICE/CVM_0051.WAV,SYSTEM.STR message 47 ENEMY TARGET DISABLED has voice byte 51; same verified loader and CVM filename path as destroyed

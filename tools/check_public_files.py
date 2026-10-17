@@ -3,7 +3,8 @@
 import subprocess
 from pathlib import PurePosixPath
 files = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
-media = {'.iso', '.bin', '.cue', '.vol', '.rbx', '.wax', '.rmf', '.wav', '.mp3', '.ogg', '.flac'}
+media = {'.iso', '.bin', '.cue', '.vol', '.rbx', '.wax', '.rmf', '.wav', '.mp3', '.ogg', '.flac',
+         '.hb0', '.hb1', '.hb2', '.dbm', '.dba', '.dpl', '.dts', '.hba'}
 private_roots = {'original', 'imported'}
 bad = []
 for name in files:
@@ -11,6 +12,7 @@ for name in files:
         continue
     p = PurePosixPath(name)
     if (p.parts[0].lower() in private_roots or p.parts[0].startswith('Earthsiege2RemasteredSoundtrack')
+            or name.startswith('assets/original/')
             or p.suffix.lower() in media or (name.startswith('assets/audio/local') and p.suffix == '.ini')
             or (name.startswith(('assets/audio/sfx/', 'assets/audio/music/', 'assets/audio/fallback/')) and p.name != 'README.md')):
         bad.append(name)

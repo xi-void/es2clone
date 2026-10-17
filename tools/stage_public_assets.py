@@ -10,6 +10,8 @@ for p in source.rglob('*'):
     if p.is_symlink() or not p.is_file():
         continue
     relative = p.relative_to(source)
+    if 'original' in relative.parts:
+        continue
     if 'audio' in relative.parts:
         keep = relative == Path('audio/audio.ini') or p.name == 'README.md'
     else:

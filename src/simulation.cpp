@@ -12,11 +12,22 @@ const Mission missions[3] = {
     {"BROKEN SIGNAL","RELAY STATION 09", "Break through the relay defenders and secure the extraction zone.",6,1.0f},
     {"LAST LIGHT","THE ASH FRONT", "Destroy the assault force. The resistance is counting on you.",8,1.25f}
 };
+const MissionLayout missionLayouts[3] = {
+    {{0,0,650}, {{{0,0,260},{380,0,-250},{-280,0,-760}}}, {150,0,-1020}},
+    {{-650,0,650}, {{{-520,0,280},{0,0,-260},{460,0,-700}}}, {620,0,-980}},
+    {{640,0,690}, {{{550,0,300},{50,0,-300},{-450,0,-760}}}, {-650,0,-1020}}
+};
+const std::array<Landmark,4> landmarks{{
+    {{-180,0,340},"LANDING RELAY",48}, {{-105,0,-220},"OLD OUTPOST",48},
+    {{620,0,-360},"EAST RELAY",65}, {{-650,0,-630},"ASH STATION",55}
+}};
 float terrainHeight(float x,float z) {
-    // Keep the combat arena gently rolling; mountains are separate scenery.
-    float ridges=(std::max(0.0f,std::abs(x)-145)*0.24f+std::max(0.0f,std::abs(z)-300)*0.27f);
-    ridges*=0.85f+0.28f*std::sin(x*0.016f+z*0.009f)+0.18f*std::cos(z*0.023f);
-    return std::sin(x*0.022f)*std::cos(z*0.018f)*1.9f + std::sin(z*0.044f+x*0.012f)*0.65f+ridges;
+    // Broad traversable folds and an outer basin rim; never stretch the old arena's steep walls.
+    float outer=clamp((std::max(std::abs(x),std::abs(z))-240)/240,0,1);
+    outer=outer*outer*(3-2*outer);
+    float folds=std::sin(x*0.004f)*std::sin(z*0.005f)*12*outer;
+    float rim=std::max(0.0f,std::abs(x)-900)*0.16f+std::max(0.0f,std::abs(z)-1100)*0.12f;
+    return std::sin(x*0.022f)*std::cos(z*0.018f)*1.9f+std::sin(z*0.044f+x*0.012f)*0.65f+folds+rim;
 }
 const std::vector<Obstacle>& obstacles() {
     static const std::vector<Obstacle> result=[] {
@@ -26,7 +37,12 @@ const std::vector<Obstacle>& obstacles() {
             objects.push_back({{x,terrainHeight(x,z)+h/2,z},{7.5f,h/2+0.5f,10}});
         }
         objects.push_back({{-105,terrainHeight(-105,-220)+10,-220},{5,10,5}});
-        for(int i=0;i<9;++i)objects.push_back({{80+i*13.0f,1,-185},{4.5f,1.3f,2.5f}});
+        for(int i=0;i<9;++i){float x=780+i*13.0f;objects.push_back({{x,terrainHeight(x,-185)+1,-185},{4.5f,1.3f,2.5f}});}
+        for(size_t i=0;i<landmarks.size();++i)if(i!=1) {
+            auto p=landmarks[i].pos;p.y=terrainHeight(p.x,p.z)+10;
+            objects.push_back({p,{5,10,5}});
+            for(int j=0;j<3;++j){auto q=p+Vec3{22.0f+j*22,0,20};q.y=terrainHeight(q.x,q.z)+6;objects.push_back({q,{8,6,10}});}
+        }
         return objects;
     }();
     return result;
@@ -53,11 +69,27 @@ Vec3 Combat::eye() const { return player.pos+Vec3{0,8.2f,0}; }
 Vec3 Combat::aim() const { return direction(player.yaw+player.torso,player.pitch); }
 Vec3 Combat::cameraEye() const {
     Vec3 offset=player.gait.displacement();
-    return eye()+direction(player.yaw+pi/2)*offset.x+Vec3{0,offset.y,0}+direction(player.yaw)*offset.z;
+    float landing=startupTime-3.55f;
+    float settle=landing>0&&!ready()?-0.055f*std::exp(-landing*3)*std::sin(landing*17):0;
+    return eye()+direction(player.yaw+pi/2)*offset.x+Vec3{0,offset.y+insertionAltitude()+settle,0}+direction(player.yaw)*offset.z;
 }
 Vec3 Combat::cameraAim() const {
     // The guns retain their commanded direction; camera suspension is cosmetic.
-    return direction(player.yaw+player.torso,player.pitch+player.gait.bounce*0.018f);
+    return direction(player.yaw+player.torso,player.pitch+player.gait.bounce*0.018f-insertionAltitude()*0.003f);
+}
+float Combat::insertionAltitude() const {
+    // Presentation anchored over the landing point; ground physics stays interlocked.
+    // Touchdown shares the existing 3.55 s mechanical activation cue.
+    float t=clamp((startupTime-0.35f)/3.2f,0,1);
+    return 45*(1-t*t*(3-2*t));
+}
+Vec3 Combat::navigationPoint() const {
+    if(extractionOpen)return extraction;
+    Vec3 point=missionLayouts[mission].sectors[size_t(std::clamp(wave-1,0,2))];
+    // Follow the remaining defenders after they leave their initial guard position.
+    float nearest=1e9f;
+    for(const auto& e:enemies)if(e.alive){float d=length(e.pos-player.pos);if(d<nearest){nearest=d;point=e.pos;}}
+    point.y=terrainHeight(point.x,point.z);return point;
 }
 float Combat::cameraRoll() const { return player.gait.sway*0.06f; }
 StartupStage Combat::startupStage() const {
@@ -67,6 +99,10 @@ StartupStage Combat::startupStage() const {
     return StartupStage::Online;
 }
 void Combat::announce(const std::string& text,float seconds) { message=text; messageTime=seconds; }
+void Combat::status(const std::string& text) {
+    // Retain kill reports when salvage or mission progression changes the lower readout.
+    if(statusMessages.size()<10)statusMessages.push_back({text,0});
+}
 void Combat::reset(int selectedChassis,int selectedMission,int shieldUpgrades,int weaponUpgrades) {
     *this=Combat{};
     chassisIndex=std::clamp(selectedChassis,0,2); mission=std::clamp(selectedMission,0,2);
@@ -75,11 +111,14 @@ void Combat::reset(int selectedChassis,int selectedMission,int shieldUpgrades,in
     player.maxShield=player.shield=c.shield+std::clamp(shieldUpgrades,0,3)*20;
     player.maxSpeed=c.speed; player.missiles=c.missiles;player.mass=c.mass;
     player.damage=c.damage*(1+std::clamp(weaponUpgrades,0,3)*0.12f);
+    player.pos=missionLayouts[mission].insertion;
+    extraction=missionLayouts[mission].extraction;
     player.pos.y=terrainHeight(player.pos.x,player.pos.z);
     extraction.y=terrainHeight(extraction.x,extraction.z);
     spawnWave();
     events.clear();events.emplace_back(Event::ReactorIgnition,1,0,c.mass);
     announce("REACTOR // Containment established. Ignition sequence.",startupDuration);
+    status(std::string("MISSION START // ")+missions[mission].name);
 }
 void Combat::spawnWave() {
     ++wave;
@@ -87,13 +126,11 @@ void Combat::spawnWave() {
     for(int i=0;i<count;++i) {
         Enemy e;
         e.id=spawned++; e.type=(e.id+mission)%3;
-        e.pos={float(i-1)*52+random(-10,10),0,-35.0f-float(i)*36};
-        if(wave>1) e.pos=player.pos+direction(player.yaw+(i-1)*0.55f)*(140+i*25.0f);
-        e.pos.x=clamp(e.pos.x,-270,270); e.pos.z=clamp(e.pos.z,-280,240);
+        e.pos=missionLayouts[mission].sectors[size_t(std::clamp(wave-1,0,2))]+Vec3{float(i-1)*52+random(-10,10),0,-float(i)*36};
         e.pos.y=terrainHeight(e.pos.x,e.pos.z);
         e.maxArmor=e.armor=72+e.type*22+mission*10;
         e.maxShield=e.shield=25+e.type*12;
-        e.legs=50+e.type*12; e.cooldown=3+i*1.3f;
+        e.legs=50+e.type*12; e.cooldown=3+i*1.3f;e.sinceHit=100;
         e.yaw=pi;
         enemies.push_back(e);
     }
@@ -117,6 +154,8 @@ void Combat::damageEnemy(int index,float damage,bool legs) {
         int value=e.legKill?50:30;
         pickups.push_back({e.pos,value,false});
         explode(e.pos+Vec3{0,6,0}); events.push_back(Event::Explosion);
+        events.push_back(e.legKill?Event::EnemyDisabled:Event::EnemyDestroyed);
+        status(e.legKill?"ENEMY TARGET DISABLED":"ENEMY TARGET DESTROYED");
         announce(e.legKill?"LEG DISABLED // Intact chassis. 50 salvage available.":"TARGET DESTROYED // 30 salvage available.",3);
         if(target==index) target=-1;
     } else events.push_back(Event::Impact);
@@ -183,6 +222,10 @@ void Combat::fire(int weapon) {
 void Combat::update(float dt,const Controls& input) {
     if(phase!=Phase::Active) return;
     dt=clamp(dt,0,0.05f);
+    if(!statusMessages.empty()) {
+        statusMessages.front().elapsed+=dt;
+        if(statusMessages.front().elapsed>=6.2f)statusMessages.pop_front();
+    }
     if(!ready()) {
         float previous=startupTime;
         startupTime=std::min(startupDuration,startupTime+dt);
@@ -219,7 +262,7 @@ void Combat::update(float dt,const Controls& input) {
     Vec3 previousPlayer=player.pos;
     player.pos+=direction(player.yaw)*(player.speed*dt);
     player.pos+=direction(player.yaw+pi/2)*(player.sideSpeed*dt);
-    player.pos.x=clamp(player.pos.x,-310,310); player.pos.z=clamp(player.pos.z,-310,260);
+    player.pos.x=clamp(player.pos.x,-battlefieldLimit,battlefieldLimit); player.pos.z=clamp(player.pos.z,-battlefieldLimit,battlefieldLimit);
     resolveMovement(player.pos,previousPlayer,3.5f);
     player.pos.y=terrainHeight(player.pos.x,player.pos.z);
     Vec3 motion=dt>0?(player.pos-previousPlayer)*(1/dt):Vec3{};motion.y=0;
@@ -241,6 +284,8 @@ void Combat::update(float dt,const Controls& input) {
         if(e.sinceHit>8) e.shield=std::min(e.maxShield,e.shield+dt*3);
         Vec3 delta=player.pos-e.pos; delta.y=0;
         float distance=length(delta); e.yaw=std::atan2(delta.x,-delta.z);
+        // Distant defenders hold their sector instead of collapsing a large mission into one rush.
+        if(distance>420&&e.sinceHit>8)continue;
         float move=distance>90?6.0f+e.type*1.4f:distance<42?-3.0f:0.0f;
         Vec3 forward=normalized(delta);
         Vec3 lateral=direction(e.yaw+pi/2)*(std::sin(time*0.45f+e.id*2)*2.8f);
@@ -250,7 +295,7 @@ void Combat::update(float dt,const Controls& input) {
             Vec3 separation=e.pos-other.pos;separation.y=0;float separationDistance=length(separation);
             if(separationDistance>0.01f&&separationDistance<10)e.pos+=separation*((10-separationDistance)/separationDistance*dt*2);
         }
-        e.pos.x=clamp(e.pos.x,-290,290); e.pos.z=clamp(e.pos.z,-290,245);
+        e.pos.x=clamp(e.pos.x,-battlefieldLimit+20,battlefieldLimit-20); e.pos.z=clamp(e.pos.z,-battlefieldLimit+20,battlefieldLimit-20);
         resolveMovement(e.pos,previousEnemy,3.5f);
         e.pos.y=terrainHeight(e.pos.x,e.pos.z);
         Vec3 enemyMotion=dt>0?(e.pos-previousEnemy)*(1/dt):Vec3{};enemyMotion.y=0;
@@ -296,7 +341,7 @@ void Combat::update(float dt,const Controls& input) {
     }
     if(alive==0&&!extractionOpen) {
         waveDelay+=dt;
-        if(spawned<missions[mission].enemies&&waveDelay>3) {spawnWave();waveDelay=0;announce("COMMAND // Reinforcements approaching. Check your radar.",5);}
+        if(spawned<missions[mission].enemies&&waveDelay>3) {spawnWave();waveDelay=0;announce("COMMAND // Advance to the next patrol sector.",5);}
         else if(kills==missions[mission].enemies) {extractionOpen=true;announce("SECTOR CLEAR // Reach the green extraction beacon.",8);events.push_back(Event::Wave);}
     }
     if(phase==Phase::Active&&extractionOpen&&length(player.pos-extraction)<24) {

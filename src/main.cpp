@@ -13,15 +13,19 @@ namespace fs=std::filesystem;
 using namespace siege;
 
 struct Options {
-    bool smoke=false,mute=false;
-    int frames=0;
-    std::string screenshot,scene="menu",saveDir,audioDir,audioConfig,audioCapture;
+    bool smoke=false,mute=false,prototypeCockpit=false;
+    int frames=0,width=0,height=0;
+    float radarMeters=defaultRadarRange;
+    std::string screenshot,scene="menu",saveDir,audioDir,audioConfig,audioCapture,originalDir;
 };
 static void help() {
-    std::cout<<"Earthsiege II: Resistance - native Linux mech combat\n\n"
+    std::cout<<"OpenEarthSiege 2 - native Linux compatibility prototype\n\n"
              <<"Usage: earthsiege [--mute] [--save-dir PATH] [--audio-dir PATH] [--audio-config FILE] [--audio-capture FILE.wav]\n"
              <<"       earthsiege --smoke-test [--scene menu|hangar|startup|combat|pause|controls|audio|debrief|flow]\n"
              <<"                  [--frames N] [--screenshot image.ppm] [--save-dir PATH]\n\n"
+             <<"Original cockpit: [--original-dir PATH] [--prototype-cockpit]\n\n"
+             <<"Window size: --size WIDTHxHEIGHT (also applies to smoke screenshots)\n\n"
+             <<"Radar: --radar-range METERS (200-2400); [ / ] adjust range in flight\n\n"
              <<"W/S move; A/D turn; Q/E strafe; mouse aims torso; C centers torso\n"
              <<"Left mouse/Space fire; right mouse missile; 1/2/3 weapon; T/Tab target\n"
              <<"Shift turbo; Escape pause; F1 controls; F2 audio mixer; M mute; F11 fullscreen\n";
@@ -57,7 +61,20 @@ int main(int argc,char** argv) {
             if(arg=="--help"||arg=="-h"){help();return 0;}
             else if(arg=="--smoke-test")options.smoke=true;
             else if(arg=="--mute")options.mute=true;
+            else if(arg=="--prototype-cockpit")options.prototypeCockpit=true;
+            else if(arg=="--original-dir")options.originalDir=value();
+            else if(arg=="--radar-range") {
+                auto v=value();size_t parsed=0;float meters=std::stof(v,&parsed);
+                if(parsed!=v.size()||!std::isfinite(meters)||meters<200||meters>2400)throw std::runtime_error("Radar range must be 200-2400 meters");
+                options.radarMeters=meters;
+            }
             else if(arg=="--frames")options.frames=std::max(1,std::stoi(value()));
+            else if(arg=="--size") {
+                auto size=value();auto separator=size.find('x');
+                if(separator==std::string::npos||size.find('x',separator+1)!=std::string::npos||size.find_first_not_of("0123456789x")!=std::string::npos)throw std::runtime_error("Expected WIDTHxHEIGHT");
+                options.width=std::stoi(size.substr(0,separator));options.height=std::stoi(size.substr(separator+1));
+                if(options.width<960||options.height<600||options.width>8192||options.height>8192)throw std::runtime_error("Window size must be between 960x600 and 8192x8192");
+            }
             else if(arg=="--screenshot")options.screenshot=value();
             else if(arg=="--scene")options.scene=value();
             else if(arg=="--audio-capture")options.audioCapture=value();
@@ -78,8 +95,9 @@ int main(int argc,char** argv) {
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER,1);SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE,24);
     int width=1440,height=900;
     if(!options.smoke){SDL_Rect usable{};if(SDL_GetDisplayUsableBounds(0,&usable)==0){width=std::min(width,usable.w-80);height=std::min(height,usable.h-100);}width=std::max(width,960);height=std::max(height,600);}
+    if(options.width){width=options.width;height=options.height;}
     Uint32 flags=SDL_WINDOW_OPENGL|SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI|(options.smoke?SDL_WINDOW_HIDDEN:SDL_WINDOW_SHOWN);
-    SDL_Window* window=SDL_CreateWindow("Earthsiege II: Resistance",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,width,height,flags);
+    SDL_Window* window=SDL_CreateWindow("OpenEarthSiege 2",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,width,height,flags);
     if(!window){std::cerr<<"Could not create the native window: "<<SDL_GetError()<<'\n';TTF_Quit();SDL_Quit();return 1;}
     SDL_SetWindowMinimumSize(window,960,600);
     SDL_GLContext context=SDL_GL_CreateContext(window);
@@ -92,6 +110,11 @@ int main(int argc,char** argv) {
     if(!fs::exists(assets/"fonts/Display.ttf"))assets=fs::current_path()/"assets";
     Renderer renderer;
     if(!renderer.init(assets.string())){renderer.destroy();SDL_GL_DeleteContext(context);SDL_DestroyWindow(window);TTF_Quit();SDL_Quit();return 1;}
+    if(!options.prototypeCockpit) {
+        fs::path originalRoot=options.originalDir.empty()?assets/"original":fs::path(options.originalDir);
+        if(options.originalDir.empty()&&fs::exists(executable/"../assets/original/TOMAHAWK.HB0"))originalRoot=executable/"../assets/original";
+        renderer.loadOriginalCockpit(originalRoot.string());
+    }
     fs::path audioRoot=options.audioDir.empty()?assets/"audio":fs::path(options.audioDir);
     if(options.audioDir.empty()&&fs::exists(executable/"../assets/audio/audio.ini"))audioRoot=executable/"../assets/audio";
     Audio audio;
@@ -99,6 +122,7 @@ int main(int argc,char** argv) {
     UIState ui;if(!options.smoke)load(ui,options.saveDir);if(options.mute||(options.smoke&&options.audioCapture.empty()))ui.muted=true;ui.volumes=audio.configuredVolumes(ui.volumes);audio.setMuted(ui.muted);audio.setVolumes(ui.volumes);audio.setSuspended(true);
     if(!options.audioCapture.empty())audio.startCapture(120);
     Combat game;game.reset();bool running=true,banked=false,mouseDown=false,rightDown=false;
+    ui.radarMeters=options.radarMeters;
     auto notify=[&](const std::string& message){ui.notice=message;ui.noticeTime=4;};
     auto persist=[&](){if(!save(ui,options.saveDir))notify("Could not save pilot data. Check the save directory.");};
     auto capture=[&](bool enabled){mouseDown=rightDown=false;if(!options.smoke){if(SDL_SetRelativeMouseMode(enabled?SDL_TRUE:SDL_FALSE)!=0&&enabled)notify("Mouse capture unavailable. Use arrow keys to aim.");SDL_ShowCursor(enabled?SDL_DISABLE:SDL_ENABLE);}};
@@ -193,7 +217,7 @@ int main(int argc,char** argv) {
                 else if(key==SDLK_F2){if(ui.screen==Screen::AudioSettings)act(Action::Back);else{if(ui.screen==Screen::Playing){ui.screen=Screen::Paused;capture(false);}act(Action::AudioSettings);}}
                 else if(key==SDLK_F1){if(ui.screen==Screen::Controls)act(Action::Back);else {if(ui.screen==Screen::Playing){ui.screen=Screen::Paused;capture(false);}act(Action::Controls);}}
                 else if(key==SDLK_ESCAPE){if(ui.screen==Screen::Playing){ui.screen=Screen::Paused;capture(false);}else if(ui.screen==Screen::Paused)act(Action::Resume);else if(ui.screen==Screen::Controls||ui.screen==Screen::Hangar||ui.screen==Screen::AudioSettings)act(Action::Back);else if(ui.screen==Screen::Debrief)ui.screen=Screen::Menu;else running=false;}
-                else if(ui.screen==Screen::Playing){if(key>=SDLK_1&&key<=SDLK_3)game.player.weapon=int(key-SDLK_1);if(key==SDLK_t||key==SDLK_TAB)game.selectTarget();if(key==SDLK_c){game.player.torso=0;game.player.pitch=0;}}
+                else if(ui.screen==Screen::Playing){if(key>=SDLK_1&&key<=SDLK_3)game.player.weapon=int(key-SDLK_1);if(key==SDLK_t||key==SDLK_TAB)game.selectTarget();if(key==SDLK_c){game.player.torso=0;game.player.pitch=0;}if(key==SDLK_LEFTBRACKET)ui.radarMeters=radarRange(ui.radarMeters-200);if(key==SDLK_RIGHTBRACKET)ui.radarMeters=radarRange(ui.radarMeters+200);}
                 else if(ui.screen==Screen::Menu||ui.screen==Screen::Hangar){if(key==SDLK_RETURN)act(Action::Launch);if(key==SDLK_h)act(Action::Hangar);if(key==SDLK_LEFT)act(ui.screen==Screen::Hangar?Action::PrevChassis:Action::PrevMission);if(key==SDLK_RIGHT)act(ui.screen==Screen::Hangar?Action::NextChassis:Action::NextMission);}
                 else if(ui.screen==Screen::Paused&&key==SDLK_RETURN)act(Action::Resume);
                 else if(ui.screen==Screen::Debrief&&key==SDLK_RETURN)act(game.phase==Phase::Won?Action::Next:Action::Retry);

@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <deque>
 #include <random>
 #include <string>
 #include <vector>
@@ -23,6 +24,11 @@ inline Vec3 cross(Vec3 a,Vec3 b) { return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b
 inline float clamp(float x,float lo,float hi) { return std::clamp(x,lo,hi); }
 inline Vec3 direction(float yaw,float pitch=0) { return {std::sin(yaw)*std::cos(pitch),std::sin(pitch),-std::cos(yaw)*std::cos(pitch)}; }
 float terrainHeight(float x,float z);
+constexpr float battlefieldLimit=1200;
+struct MissionLayout { Vec3 insertion; std::array<Vec3,3> sectors; Vec3 extraction; };
+extern const MissionLayout missionLayouts[3];
+struct Landmark { Vec3 pos; const char* name; float height; };
+extern const std::array<Landmark,4> landmarks;
 struct Obstacle { Vec3 center,halfSize; };
 const std::vector<Obstacle>& obstacles();
 bool solidAt(Vec3 position,float radius=0);
@@ -33,7 +39,7 @@ extern const Mission missions[3];
 enum class Phase { Active, Won, Lost };
 enum class Event { Laser, Cannon, Missile, Impact, Explosion, Lock, Wave, Win, Lose, Overheat,
     FootLeft, FootRight, HydraulicLeft, HydraulicRight, ReactorIgnition, SystemInit, MechanicalActivate, ReactorReady,
-    TurboEngage, TurboRelease, ReactorShutdown, DamageWarning, Count };
+    TurboEngage, TurboRelease, ReactorShutdown, DamageWarning, EnemyDestroyed, EnemyDisabled, Count };
 struct SoundEvent {
     Event type;
     float strength=1,pan=0,mass=65,activity=0;
@@ -81,6 +87,7 @@ struct Projectile { Vec3 pos,velocity; float life=0; int target=-1; bool friendl
 struct Beam { Vec3 a,b; float life=0,maxLife=0; int kind=0; };
 struct Particle { Vec3 pos,velocity; float life=0,maxLife=0,size=0; int kind=0; };
 struct Pickup { Vec3 pos; int value=0; bool collected=false; };
+struct CockpitMessage { std::string text; float elapsed=0; };
 struct Combat {
     Player player;
     std::vector<Enemy> enemies;
@@ -93,6 +100,7 @@ struct Combat {
     int mission=0,chassisIndex=0,kills=0,spawned=0,wave=0,salvage=0,target=-1;
     float time=0,waveDelay=0,hitFlash=0,damageFlash=0,messageTime=0,startupTime=0;
     std::string message;
+    std::deque<CockpitMessage> statusMessages;
     Vec3 extraction{0,0,-225};
     bool extractionOpen=false;
     std::mt19937 rng{2624};
@@ -105,12 +113,15 @@ struct Combat {
     void spawnWave();
     void explode(Vec3 pos,int count=32);
     void announce(const std::string& text,float seconds=4);
+    void status(const std::string& text);
     Vec3 eye() const;
     Vec3 cameraEye() const;
     Vec3 cameraAim() const;
     float cameraRoll() const;
     bool ready() const { return startupTime>=startupDuration; }
     StartupStage startupStage() const;
+    float insertionAltitude() const;
+    Vec3 navigationPoint() const;
     Vec3 aim() const;
     float random(float low,float high);
 };

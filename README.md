@@ -1,6 +1,8 @@
-# Earthsiege II: Resistance
+# OpenEarthSiege 2
 
-A **native Linux mech-combat game** written in C++17 with SDL2 and OpenGL. This is a playable, independently implemented recreation of the Earthsiege-style combat loop, with procedural models, terrain, interface, and fallback sound, plus optional locally imported original audio. It is a small game, not a port of the complete commercial campaign.
+A **native Linux reimplementation project** for the original 1996 EarthSiege 2, written in C++17 with SDL2 and OpenGL. The goal is original game compatibility, with engine code independent of copyrighted assets and optional remastered music. The current playable prototype supports original audio and a first original cockpit; its terrain, chassis statistics, combat rules and custom missions remain approximations. It does not yet run the original campaign.
+
+See the [compatibility assessment and practical roadmap](docs/compatibility-roadmap.md) for verified systems, placeholders, undecoded resources, and the next implementation steps. Existing executable names and save locations are retained for compatibility.
 
 ## Run
 
@@ -22,7 +24,18 @@ No browser, web server, network connection, or original game files are required.
 
 Build dependencies: a C++17 compiler, CMake 3.16+, pkg-config, SDL2, SDL2_ttf, libsndfile 1.1+ (with MP3, FLAC and Vorbis codecs), Python 3, and OpenGL development libraries. These were already available on the development machine. Runtime dependencies are SDL2, SDL2_ttf, libsndfile, the C++ runtime, and an OpenGL 2.1-compatible graphics driver. SDL2 compatibility implementations backed by SDL3 work too.
 
-## Play
+## Original cockpit
+
+Keep the ISO in ignored `original/`. Import the original Tomahawk cockpit shown in the reference image:
+
+```sh
+python3 tools/import_original_graphics.py original/Earthsiege2_Freeware_HiRezStudios_1r0.iso
+./run.sh
+```
+
+This reads only the needed archive and copies two graphics resources into ignored `assets/original/`; it leaves every audio association unchanged. The game loads the original bitmap and palette directly, preserving 4:3 proportions, and moves the frame/instruments with the existing foot-contact suspension. Current instrument text and behavior remain approximate. `--prototype-cockpit` selects the previous artwork; missing or invalid graphics also use it. See [formats, import paths, inspection and limitations](docs/original-graphics.md).
+
+## Play the current prototype
 
 Select an operation on the title screen, or open **Hangar** to choose a HERC. Press **Enter** or click **Deploy HERC**. See the in-game field manual with **F1**.
 
@@ -39,17 +52,20 @@ Select an operation on the title screen, or open **Hangar** to choose a HERC. Pr
 | Right mouse | Launch a guided missile |
 | 1 / 2 / 3 | Laser / autocannon / missiles |
 | T / Tab | Cycle hostile target |
+| [ / ] | Decrease / increase radar range |
 | Escape | Pause and release the mouse |
 | F1 | Field manual |
 | F2 | Independent music / weapons / machinery / interface volumes |
 | M | Mute / unmute |
 | F11 | Fullscreen |
 
-Deployment begins with a 6.2-second reactor ignition, systems check, hydraulic pressurization, and actuator activation. Movement and weapons unlock when the sequence completes; enemies and the mission clock wait too. Destroy all enemy waves, then walk into the green extraction beacon. The windshield radar shows hostiles in cyan; green brackets mark visible targets. Extraction banks your recovered salvage and a mission bonus. Defeat loses the current mission's unbanked salvage.
+Deployment begins with a brief air-drop presentation during the existing 6.2-second reactor boot. Movement and weapons unlock when the sequence completes; enemies and the mission clock wait too. Clear the separated patrol sectors across a 2.4 × 2.4 km battlefield, then reach the green extraction beacon. The heading-up radar shows enemies, waypoint/extraction bearings and relay landmarks. Set its radius with `--radar-range 800` or **[ / ]** in flight. Extraction banks your recovered salvage and a mission bonus. Defeat loses the current mission's unbanked salvage.
+
+Mission start and kills appear in a cyan cockpit marquee. Leg kills report **ENEMY TARGET DISABLED**; torso kills report **ENEMY TARGET DESTROYED**, each with its verified original computer voice when installed. See [battlefield behavior, cockpit corrections and validation](docs/battlefield.md) for current approximations and testing instructions. Use `--size 1280x720` to select a window size.
 
 Shields regenerate five seconds after the last hit. Weapons shut down at maximum reactor heat until the reactor cools below 42%. Guided missiles home on a target in front of you; laser and cannon shots require aiming. Buildings block movement and fire. Disabling enemy legs preserves more salvage than destroying the torso. Walk within 19 meters of a green salvage crate to collect it and repair 12 armor.
 
-Spend banked salvage in the hangar on shield capacitors and weapon amplifiers. Upgrades apply to all three chassis. The **65-tonne Nomad** is balanced, **100-tonne Bastion** trades speed for armor and firepower, and **40-tonne Strider** favors mobility. Three operations increase the size and strength of the enemy force. All use the same volcanic battlefield, with basalt ridges, glowing fissures, a red sky, and a ruined relay station. The beveled three-console cockpit follows the classic simulator layout.
+Spend banked salvage in the hangar on shield capacitors and weapon amplifiers. Upgrades apply to all three chassis. The **65-tonne Nomad** is balanced, **100-tonne Bastion** trades speed for armor and firepower, and **40-tonne Strider** favors mobility. These are prototype loadouts, not original HERC specifications. Three custom operations increase the size and strength of the enemy force. All use the same generated volcanic battlefield; original terrain is a separate compatibility milestone.
 
 ## Machinery and music
 
@@ -72,7 +88,7 @@ python3 tools/import_original_audio.py original/Earthsiege2_Freeware_HiRezStudio
   --output imported/from-iso --map tools/original-audio-map.csv
 ```
 
-ISO input requires `7z`; an extracted installation directory also works. The importer preserves the source and creates a detailed inventory. Verified mappings load original footsteps, engine, startup, weapons, impacts, explosions, lock and warning sounds. Unidentified turbo/hydraulic recordings remain unmapped, with procedural layers filling those gaps. See the [import workflow and format findings](docs/original-audio.md).
+ISO input requires `7z`; an extracted installation directory also works. The importer preserves the source and creates a detailed inventory. Existing mappings load original footsteps, engine, startup, weapons, impacts, explosions, lock and warning sounds. Turbo activation uses the verified original `THROTL.WAV`; turbo release and hydraulic gaps retain procedural layers. See the [import workflow and format findings](docs/original-audio.md).
 
 Edit `assets/audio/audio.ini` for music mode, menu playback, crossfade, ducking, volumes and event mappings. Imported mappings are in ignored `assets/audio/local.ini`. Press **F2** for the existing music / weapons / machinery / interface sliders. Explicit INI volume values override saved pilot levels on launch; blank settings use the saved levels. **M** mutes every bus. Assets missing or failing to decode fall back safely.
 
@@ -111,6 +127,8 @@ Simulation tests exercise combat and a simulated pilot completing all three oper
 
 Native smoke tests create actual SDL/OpenGL contexts, render all nine screens/scenarios, check GL errors, and exercise menu clicks, hotkeys, upgrades, pause, restart, independent music volume, and save persistence through SDL events.
 
+Graphics tests use synthetic DBM/DBA/DPL data, validate bounds and alignment, and check import/package isolation. With the supplied extraction, `./build/original_graphics_tests imported/from-iso/resources/VOL/SIMVOL0.VOL` also checks all nine original cockpit frames. Native smoke tests automatically use the imported Tomahawk frame when present.
+
 For a native rendering screenshot without a display:
 
 ```sh
@@ -134,12 +152,14 @@ To make a relocatable tar archive for a compatible Linux system:
 ./package.sh
 ```
 
-The archive includes the game, audio audition tool, fonts, icon, and documentation. System libraries are dynamically linked; rebuild from source on Linux distributions with older/incompatible runtime libraries.
+The archive includes the game, audio audition tool, bitmap inspection tool, import scripts, fonts, icon, and documentation. Original assets are excluded. System libraries are dynamically linked; rebuild from source on Linux distributions with older/incompatible runtime libraries.
 
 ## Source layout
 
 - `src/simulation.*`: graphics-independent combat, movement, collision, AI, and mission rules.
 - `src/renderer.*`: procedural 3D models, terrain, cockpit HUD, menus, and font atlas.
+- `src/original_graphics.*`, `src/original_cockpit.cpp`: bounded original bitmap/palette decoding and the first native cockpit integration.
+- `tools/import_original_graphics.py`, `tools/graphics_probe.cpp`: isolated graphics import and bitmap inspection.
 - `src/locomotion.cpp`: shared foot trajectories, contact transitions, and damped cockpit suspension.
 - `src/synthesis.*`: procedural fallback effects, reactor synthesis, and four-bus mixer.
 - `src/audio_assets.*`, `src/music_stream.*`: configuration, cached effects, decoders and bounded music streaming.
@@ -152,12 +172,14 @@ The simulation runs at 120 Hz independently of rendering. The renderer uses the 
 
 ## Screenshots
 
+These show the previous prototype artwork. Screenshots containing locally imported original artwork remain private.
+
 ![Native title screen](docs/screenshots/menu.png)
 
 ![Native cockpit and combat](docs/screenshots/combat.png)
 
 ## Credits
 
-Inspired by [Earthsiege 2 by Dynamix/Sierra](https://www.sierragamers.com/earthsiege-2/). This project is an unofficial fan recreation; the public source and package include no original game code, models, textures, recordings, or campaign data. Locally imported assets remain outside version control. Earthsiege names belong to their respective owners.
+An unofficial, independent reimplementation of [Earthsiege 2 by Dynamix/Sierra](https://www.sierragamers.com/earthsiege-2/). The public source and package include no original game code, models, textures, recordings, or campaign data. Locally imported assets remain outside version control. Earthsiege names belong to their respective owners.
 
 Bundled Liberation Sans and Liberation Mono fonts are licensed under the SIL Open Font License. See `assets/fonts/LICENSE`.

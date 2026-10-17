@@ -42,16 +42,19 @@ bool Renderer::init(const std::string& path) {
     glEnable(GL_NORMALIZE);glDisable(GL_CULL_FACE);
     makeTerrain();return true;
 }
-void Renderer::destroy() {if(display.texture)glDeleteTextures(1,&display.texture);if(mono.texture)glDeleteTextures(1,&mono.texture);if(groundTexture)glDeleteTextures(1,&groundTexture);if(terrainList)glDeleteLists(terrainList,1);if(sceneryList)glDeleteLists(sceneryList,1);}
-void Renderer::begin2D() {
+void Renderer::destroy() {if(originalCockpitTexture)glDeleteTextures(1,&originalCockpitTexture);if(display.texture)glDeleteTextures(1,&display.texture);if(mono.texture)glDeleteTextures(1,&mono.texture);if(groundTexture)glDeleteTextures(1,&groundTexture);if(terrainList)glDeleteLists(terrainList,1);if(sceneryList)glDeleteLists(sceneryList,1);}
+void Renderer::begin2D(float width,float height) {
+    uiWidth=width;uiHeight=height;
+    GLint viewport[4];glGetIntegerv(GL_VIEWPORT,viewport);
+    strokeScale=width==640?float(viewport[3])/height:1;
     glDisable(GL_DEPTH_TEST);glDisable(GL_LIGHTING);glDisable(GL_FOG);glDisable(GL_TEXTURE_2D);
-    glMatrixMode(GL_PROJECTION);glLoadIdentity();glOrtho(0,1440,900,0,-1,1);
+    glMatrixMode(GL_PROJECTION);glLoadIdentity();glOrtho(0,width,height,0,-1,1);
     glMatrixMode(GL_MODELVIEW);glLoadIdentity();
 }
 void Renderer::rect(float x,float y,float w,float h,Color c) {color(c);glBegin(GL_QUADS);glVertex2f(x,y);glVertex2f(x+w,y);glVertex2f(x+w,y+h);glVertex2f(x,y+h);glEnd();}
-void Renderer::outline(float x,float y,float w,float h,Color c,float thickness) {glLineWidth(thickness);color(c);glBegin(GL_LINE_LOOP);glVertex2f(x,y);glVertex2f(x+w,y);glVertex2f(x+w,y+h);glVertex2f(x,y+h);glEnd();glLineWidth(1);}
-void Renderer::line(float x,float y,float xx,float yy,Color c,float thickness) {glLineWidth(thickness);color(c);glBegin(GL_LINES);glVertex2f(x,y);glVertex2f(xx,yy);glEnd();glLineWidth(1);}
-void Renderer::circle(float x,float y,float radius,Color c,bool fill,int segments) {color(c);glBegin(fill?GL_TRIANGLE_FAN:GL_LINE_LOOP);if(fill)glVertex2f(x,y);for(int i=0;i<=segments;++i){float a=float(i)/segments*pi*2;glVertex2f(x+std::cos(a)*radius,y+std::sin(a)*radius);}glEnd();}
+void Renderer::outline(float x,float y,float w,float h,Color c,float thickness) {glLineWidth(std::max(1.0f,thickness*strokeScale));color(c);glBegin(GL_LINE_LOOP);glVertex2f(x,y);glVertex2f(x+w,y);glVertex2f(x+w,y+h);glVertex2f(x,y+h);glEnd();glLineWidth(1);}
+void Renderer::line(float x,float y,float xx,float yy,Color c,float thickness) {glLineWidth(std::max(1.0f,thickness*strokeScale));color(c);glBegin(GL_LINES);glVertex2f(x,y);glVertex2f(xx,yy);glEnd();glLineWidth(1);}
+void Renderer::circle(float x,float y,float radius,Color c,bool fill,int segments) {glLineWidth(std::max(1.0f,strokeScale));color(c);glBegin(fill?GL_TRIANGLE_FAN:GL_LINE_LOOP);if(fill)glVertex2f(x,y);for(int i=0;i<=segments;++i){float a=float(i)/segments*pi*2;glVertex2f(x+std::cos(a)*radius,y+std::sin(a)*radius);}glEnd();glLineWidth(1);}
 float Renderer::textWidth(const std::string& value,float size,bool bold,float spacing) {const Font& font=bold?display:mono;float width=0;for(unsigned char c:value)width+=font.glyphs[c<128?c:'?'].advance*size/font.size+spacing;return width;}
 void Renderer::text(float x,float y,const std::string& value,float size,Color c,bool bold,float spacing) {
     const Font& f=bold?display:mono;float scale=size/f.size;
@@ -81,8 +84,8 @@ void Renderer::sky(float) {
 }
 void Renderer::camera(Vec3 eye,Vec3 center,float fov,float roll) {
     glMatrixMode(GL_PROJECTION);glLoadIdentity();
-    double near=0.3,top=near*std::tan(fov*pi/360.0);double aspect=double(pixelWidth)/pixelHeight;
-    glFrustum(-top*aspect,top*aspect,-top,top,near,1800);
+    double near=0.3,top=near*std::tan(fov*pi/360.0);double aspect=viewAspect;
+    glFrustum(-top*aspect,top*aspect,-top,top,near,3600);
     glGetFloatv(GL_PROJECTION_MATRIX,projection);
     Vec3 forward=normalized(center-eye),side=normalized(cross(forward,{0,1,0})),up=cross(side,forward);
     Vec3 rolled=side*std::cos(roll)+up*std::sin(roll);up=up*std::cos(roll)-side*std::sin(roll);side=rolled;
@@ -134,23 +137,32 @@ void Renderer::makeTerrain() {
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
     terrainList=glGenLists(1);glNewList(terrainList,GL_COMPILE);glBegin(GL_TRIANGLES);
-    for(int x=-720;x<720;x+=18)for(int z=-720;z<720;z+=18) {
-        Vec3 a{float(x),terrainHeight(float(x),float(z)),float(z)},b{float(x+18),terrainHeight(float(x+18),float(z)),float(z)},c{float(x+18),terrainHeight(float(x+18),float(z+18)),float(z+18)},d{float(x),terrainHeight(float(x),float(z+18)),float(z+18)};
+    for(int x=-1680;x<1680;x+=24)for(int z=-1680;z<1680;z+=24) {
+        Vec3 a{float(x),terrainHeight(float(x),float(z)),float(z)},b{float(x+24),terrainHeight(float(x+24),float(z)),float(z)},c{float(x+24),terrainHeight(float(x+24),float(z+24)),float(z+24)},d{float(x),terrainHeight(float(x),float(z+24)),float(z+24)};
         float shade=random(0.87f,1.07f);Color base{shade,shade,shade};
         auto tri=[&](Vec3 p,Vec3 q,Vec3 r){Vec3 n=normalized(cross(q-p,r-p));color(base);glNormal3f(n.x,n.y,n.z);for(Vec3 v:{p,q,r}){glTexCoord2f(v.x*0.055f,v.z*0.055f);vertex(v);}};tri(a,d,b);tri(b,d,c);
     }
     glEnd();glEndList();
     sceneryList=glGenLists(1);glNewList(sceneryList,GL_COMPILE);
     glEnable(GL_TEXTURE_2D);glBindTexture(GL_TEXTURE_2D,groundTexture);
-    for(int i=0;i<55;++i){float a=float(i)*2*pi/55;mountain(std::cos(a)*random(650,820),std::sin(a)*random(650,820),random(100,220),random(70,150),{0.78f,0.83f,0.90f},i);}
+    for(int i=0;i<55;++i){float a=float(i)*2*pi/55;mountain(std::cos(a)*random(1850,2100),std::sin(a)*random(1850,2100),random(180,320),random(100,220),{0.78f,0.83f,0.90f},i);}
     glDisable(GL_TEXTURE_2D);
-    for(int i=0;i<150;++i){float x=random(-580,580),z=random(-580,580);if(std::abs(x)<85&&z>-170&&z<150)continue;float s=random(1,5);glPushMatrix();glTranslatef(x,terrainHeight(x,z),z);glRotatef(random(0,360),0,1,0);glRotatef(random(-15,15),0,0,1);box({0,s*0.3f,0},{s*1.8f,s,s*1.3f},{0.30f,0.29f,0.24f});glPopMatrix();}
+    for(int i=0;i<150;++i){float x=random(-1350,1350),z=random(-1350,1350);if(std::abs(x)<85&&z>-170&&z<150)continue;float s=random(1,5);glPushMatrix();glTranslatef(x,terrainHeight(x,z),z);glRotatef(random(0,360),0,1,0);glRotatef(random(-15,15),0,0,1);box({0,s*0.3f,0},{s*1.8f,s,s*1.3f},{0.30f,0.29f,0.24f});glPopMatrix();}
     // A ruined relay outpost on the western edge of the battlefield.
     for(int i=0;i<5;++i){float x=-130+i*20.0f,z=-140-(i%2)*38.0f,y=terrainHeight(x,z),h=9+(i%3)*5.0f;box({x,y+h/2,z},{14,h,19},{0.28f,0.30f,0.27f});box({x,y+h,z},{15,1,20},{0.18f,0.22f,0.21f});for(int j=0;j<4;++j)box({x-5+j*3.2f,y+h*0.65f,z+9.56f},{1.6f,1.3f,0.1f},{0.10f,0.16f,0.15f});}
     cylinder({-105,terrainHeight(-105,-220),-220},5,20,{0.25f,0.29f,0.26f});
-    cylinder({-105,20,-220},0.7f,28,{0.25f,0.28f,0.25f});
-    box({-105,38,-220},{18,0.6f,0.8f},{0.23f,0.28f,0.25f});box({-105,43,-220},{12,0.6f,0.8f},{0.23f,0.28f,0.25f});
-    for(int i=0;i<9;++i){float x=80+i*13.0f;box({x,1,-185},{9,2.6f,5},{0.33f,0.32f,0.25f});}
+    cylinder({-105,terrainHeight(-105,-220)+20,-220},0.7f,28,{0.25f,0.28f,0.25f});
+    box({-105,terrainHeight(-105,-220)+38,-220},{18,0.6f,0.8f},{0.23f,0.28f,0.25f});box({-105,terrainHeight(-105,-220)+43,-220},{12,0.6f,0.8f},{0.23f,0.28f,0.25f});
+    for(int i=0;i<9;++i){float x=780+i*13.0f;box({x,terrainHeight(x,-185)+1,-185},{9,2.6f,5},{0.33f,0.32f,0.25f});}
+    for(size_t i=0;i<landmarks.size();++i)if(i!=1) {
+        auto p=landmarks[i].pos;float y=terrainHeight(p.x,p.z),h=landmarks[i].height;
+        cylinder({p.x,y,p.z},5,20,{0.25f,0.29f,0.26f});
+        cylinder({p.x,y+20,p.z},0.7f,h-20,{0.25f,0.28f,0.25f});
+        box({p.x,y+h-7,p.z},{18,0.6f,0.8f},{0.23f,0.28f,0.25f});
+        box({p.x,y+h-2,p.z},{12,0.6f,0.8f},{0.23f,0.28f,0.25f});
+        box({p.x,y+h,p.z},{1.6f,1.6f,1.6f},{0.8f,0.26f,0.08f});
+        for(int j=0;j<3;++j){float x=p.x+22+j*22,z=p.z+20,base=terrainHeight(x,z);box({x,base+6,z},{16,12,20},{0.28f,0.30f,0.27f});}
+    }
     glEndList();
 }
 void Renderer::shadow(Vec3 p,float radius) {
@@ -222,7 +234,7 @@ void Renderer::world(const Combat& game,bool menuMode,float time) {
     glEnable(GL_LIGHTING);glEnable(GL_LIGHT0);glEnable(GL_COLOR_MATERIAL);glColorMaterial(GL_FRONT_AND_BACK,GL_AMBIENT_AND_DIFFUSE);
     const float ambient[]={0.40f,0.43f,0.50f,1},sun[]={0.90f,0.86f,0.85f,1},position[]={-0.4f,0.85f,0.6f,0};
     glLightModelfv(GL_LIGHT_MODEL_AMBIENT,ambient);glLightfv(GL_LIGHT0,GL_DIFFUSE,sun);glLightfv(GL_LIGHT0,GL_POSITION,position);
-    glEnable(GL_FOG);const float fog[]={0.24f,0.20f,0.22f,1};glFogfv(GL_FOG_COLOR,fog);glFogi(GL_FOG_MODE,GL_LINEAR);glFogf(GL_FOG_START,130);glFogf(GL_FOG_END,1000);
+    glEnable(GL_FOG);const float fog[]={0.24f,0.20f,0.22f,1};glFogfv(GL_FOG_COLOR,fog);glFogi(GL_FOG_MODE,GL_LINEAR);glFogf(GL_FOG_START,350);glFogf(GL_FOG_END,2300);
     glEnable(GL_TEXTURE_2D);glBindTexture(GL_TEXTURE_2D,groundTexture);glCallList(terrainList);glDisable(GL_TEXTURE_2D);glCallList(sceneryList);
     if(menuMode) {Vec3 pos{11,terrainHeight(11,0),0};mech(pos,pi+0.65f+std::sin(time*0.12f)*0.12f,Gait{},state->chassis,true);}
     else {
@@ -248,13 +260,13 @@ bool Renderer::project(Vec3 p,float& x,float& y) const {
     for(int r=0;r<4;++r)for(int c=0;c<4;++c)view[r]+=matrix[c*4+r]*v[c];
     for(int r=0;r<4;++r)for(int c=0;c<4;++c)clip[r]+=projection[c*4+r]*view[c];
     if(clip[3]<=0.1f)return false;
-    x=(clip[0]/clip[3]*0.5f+0.5f)*1440;y=(-clip[1]/clip[3]*0.5f+0.5f)*900;
-    return x>0&&x<1440&&y>0&&y<900;
+    x=(clip[0]/clip[3]*0.5f+0.5f)*uiWidth;y=(-clip[1]/clip[3]*0.5f+0.5f)*uiHeight;
+    return x>0&&x<uiWidth&&y>0&&y<uiHeight;
 }
 void Renderer::topbar(const UIState& ui) {
     line(48,92,1392,92,{0.62f,0.66f,0.59f,0.22f});
     line(52,38,66,65,orange,4);line(66,65,80,38,orange,4);line(58,52,74,52,orange,3);
-    text(99,31,"EARTHSIEGE II",22,cream,true,1);text(100,59,"RESISTANCE / HERC OPERATIONS",10,muted,false,1.3f);
+    text(99,31,"OPENEARTHSIEGE 2",22,cream,true,1);text(100,59,"COMPATIBILITY PROTOTYPE",10,muted,false,1.3f);
     circle(1090,49,3,mint,true);text(1102,40,"SYSTEM ONLINE",11,mint);
     button(1230,30,65,36,ui.muted?"MUTED":"SOUND",Action::Sound);button(1308,30,82,36,"F11  [ ]",Action::Fullscreen);
 }
@@ -302,17 +314,45 @@ void Renderer::hangar(const UIState& ui) {
     text(944,735,num(chassis[ui.chassis].mass)+" TONNES // READY",12,mint,false,1.2f);text(944,764,"LASER / AUTOCANNON / MISSILES",11,cream);
 }
 void Renderer::radar(const Combat& game,float x,float y,float size) {
-    float cx=x+size/2,cy=y+size/2,r=size*0.45f;
-    rect(x,y,size,size,{0.035f,0.075f,0.062f,0.97f});outline(x,y,size,size,border);
-    for(int i=1;i<=3;++i)circle(cx,cy,r*i/3,{0.28f,0.47f,0.37f,0.35f});
-    line(x+8,cy,x+size-8,cy,{0.28f,0.47f,0.37f,0.3f});line(cx,y+8,cx,y+size-8,{0.28f,0.47f,0.37f,0.3f});
-    float angle=game.time*1.1f;line(cx,cy,cx+std::cos(angle)*r,cy+std::sin(angle)*r,{0.5f,0.9f,0.6f,0.45f});
-    auto point=[&](Vec3 pos,Color c,float s){Vec3 d=pos-game.player.pos;float sine=std::sin(game.player.yaw),cosine=std::cos(game.player.yaw);float px=(d.x*cosine+d.z*sine)*r/250,py=(-d.x*sine+d.z*cosine)*r/250;float l=std::sqrt(px*px+py*py);if(l>r){px*=r/l;py*=r/l;}rect(cx+px-s/2,cy+py-s/2,s,s,c);};
-    for(const auto& e:game.enemies)if(e.alive)point(e.pos,red,5);
-    for(const auto& p:game.pickups)if(!p.collected)point(p.pos,mint,3);
-    if(game.extractionOpen)point(game.extraction,mint,7);
-    color(cream);glBegin(GL_TRIANGLES);glVertex2f(cx,cy-6);glVertex2f(cx-4,cy+4);glVertex2f(cx+4,cy+4);glEnd();
-    text(x+7,y+5,"RADAR",9,mint);text(x+size-43,y+size-17,"250 M",8,muted);
+    constexpr Color cyan{0.13f,0.77f,0.95f},green{0.18f,0.95f,0.12f},dim{0.25f,0.6f,0.65f,0.45f};
+    float scale=size/90,r=size*0.40f,cx=x+size/2,cy=y+size/2;
+    // An open windshield sensor display, with a faint range ring rather than a new console.
+    circle(cx,cy,r,dim,false,48);circle(cx,cy,r/2,{dim.r,dim.g,dim.b,0.18f},false,32);
+    auto point=[&](Vec3 p){return radarPoint(p,game.player,state->radarMeters);};
+    auto diamond=[&](RadarPoint p,Color c,float radius){float px=cx+p.x*r,py=cy+p.y*r;
+        line(px,py-radius,px+radius,py,c);line(px+radius,py,px,py+radius,c);
+        line(px,py+radius,px-radius,py,c);line(px-radius,py,px,py-radius,c);};
+    for(const auto& landmark:landmarks){auto p=point(landmark.pos);if(p.inRange)outline(cx+p.x*r-1.5f*scale,cy+p.y*r-1.5f*scale,3*scale,3*scale,dim);}
+    auto exit=point(game.extraction);diamond(exit,game.extractionOpen?green:dim,3*scale);
+    if(!game.extractionOpen)diamond(point(game.navigationPoint()),{0.98f,0.68f,0.13f},3.7f*scale);
+    for(size_t i=0;i<game.enemies.size();++i)if(game.enemies[i].alive) {
+        auto p=point(game.enemies[i].pos);if(!p.inRange)continue;
+        float px=cx+p.x*r,py=cy+p.y*r;
+        circle(px,py,2.4f*scale,{0.02f,0.05f,0.07f},true,8);
+        circle(px,py,1.4f*scale,cyan,true,8);
+        if(int(i)==game.target)outline(px-3*scale,py-3*scale,6*scale,6*scale,green);
+    }
+    // Forward is always up; the thin ray is the independent torso / weapon heading.
+    line(cx,cy,cx+std::sin(game.player.torso)*10*scale,cy-std::cos(game.player.torso)*10*scale,green);
+    color({0.93f,0.94f,0.90f});glBegin(GL_TRIANGLES);
+    glVertex2f(cx,cy-3*scale);glVertex2f(cx-2.5f*scale,cy+2*scale);glVertex2f(cx+2.5f*scale,cy+2*scale);glEnd();
+    float north=game.player.yaw;
+    centered(cx-std::sin(north)*(r+4*scale),cy-std::cos(north)*(r+4*scale)-3*scale,"N",6*scale,cyan);
+    centered(cx,y+size-3*scale,num(state->radarMeters)+" M",6.5f*scale,cyan);
+}
+void Renderer::marquee(const Combat& game,float x,float y,float width,float size) {
+    if(game.statusMessages.empty())return;
+    const auto& message=game.statusMessages.front();
+    while(size>6&&textWidth(message.text,size)>width-8)size-=0.25f;
+    float w=textWidth(message.text,size),at=x+(width-w)/2,t=message.elapsed;
+    if(t<0.6f)at+=(width+w)/2*(1-t/0.6f);
+    if(t>5.6f)at-=(width+w)/2*((t-5.6f)/0.6f);
+    GLint viewport[4],previous[4];glGetIntegerv(GL_VIEWPORT,viewport);glGetIntegerv(GL_SCISSOR_BOX,previous);
+    bool clipped=glIsEnabled(GL_SCISSOR_TEST);glEnable(GL_SCISSOR_TEST);
+    glScissor(viewport[0]+int(x/uiWidth*viewport[2]),viewport[1]+int((uiHeight-y-size-3)/uiHeight*viewport[3]),
+              int(width/uiWidth*viewport[2]),int((size+4)/uiHeight*viewport[3]));
+    text(at,y,message.text,size,{0.13f,0.77f,0.95f});
+    glScissor(previous[0],previous[1],previous[2],previous[3]);if(!clipped)glDisable(GL_SCISSOR_TEST);
 }
 void Renderer::bevel(float x,float y,float w,float h,float rim,Color face) {
     rect(x,y,w,h,{0.055f,0.045f,0.05f});
@@ -323,11 +363,11 @@ void Renderer::bevel(float x,float y,float w,float h,float rim,Color face) {
     line(x+rim,y+rim,x+w-rim,y+rim,{0.68f,0.65f,0.72f},2);
     line(x+rim,y+rim,x+rim,y+h-rim,{0.51f,0.49f,0.54f},2);
 }
-void Renderer::schematic(float x,float y,float scale,float armor,float legs) {
-    auto part=[&](float px,float py,float w,float h,float health){Color c=health>0.3f?Color{0.15f,0.9f,0.12f}:red;outline(x+px*scale,y+py*scale,w*scale,h*scale,c,2);outline(x+(px+3)*scale,y+(py+3)*scale,(w-6)*scale,(h-6)*scale,c);};
+void Renderer::schematic(float x,float y,float scale,float armor,float legs,float stroke) {
+    auto part=[&](float px,float py,float w,float h,float health){Color c=health>0.3f?Color{0.15f,0.9f,0.12f}:red;outline(x+px*scale,y+py*scale,w*scale,h*scale,c,stroke);outline(x+(px+3)*scale,y+(py+3)*scale,(w-6)*scale,(h-6)*scale,c,stroke*0.5f);};
     part(34,0,24,20,armor);part(23,23,46,37,armor);part(0,19,19,37,armor);part(73,19,19,37,armor);
     part(29,63,15,30,legs);part(49,63,15,30,legs);part(27,96,17,34,legs);part(49,96,17,34,legs);
-    line(x+19*scale,y+32*scale,x+23*scale,y+32*scale,{0.2f,1,0.1f},2);line(x+69*scale,y+32*scale,x+73*scale,y+32*scale,{0.2f,1,0.1f},2);
+    line(x+19*scale,y+32*scale,x+23*scale,y+32*scale,{0.2f,1,0.1f},stroke);line(x+69*scale,y+32*scale,x+73*scale,y+32*scale,{0.2f,1,0.1f},stroke);
 }
 void Renderer::hud(const Combat& game,const UIState& ui) {
     const auto& p=game.player;
@@ -342,10 +382,10 @@ void Renderer::hud(const Combat& game,const UIState& ui) {
     float heading=std::fmod((p.yaw+p.torso)*180/pi+3600,360.0f);
     rect(502,13,436,7,{0.03f,0.05f,0.04f});rect(647,14,146,5,{0.08f,0.38f,0.16f});line(720+p.torso*60,6,720+p.torso*60,29,cyan,3);
     for(int i=-20;i<=20;++i){float x=720+i*13;rect(x,55,3,i%5==0?8:3,cyan);if(i%10==0)centered(x,69,num(std::fmod(heading+i+360,360)),18,cyan);}
-    std::string objective=game.extractionOpen?"EXTRACTION: "+num(length(game.extraction-p.pos))+" M.":"PATROL: "+std::to_string(game.kills)+" / "+std::to_string(missions[game.mission].enemies)+" DESTROYED";
+    std::string objective=(game.extractionOpen?"EXTRACTION: ":"WAYPOINT "+std::to_string(game.wave)+": ")+num(length(game.navigationPoint()-p.pos))+" M.";
     centered(720,100,objective,16,cyan);
-    // Open radar display in the upper-left windshield, like the original cockpit.
-    for(int i=0;i<int(game.enemies.size());++i)if(game.enemies[i].alive){Vec3 d=game.enemies[i].pos-p.pos;float x=230+(d.x*std::cos(p.yaw)+d.z*std::sin(p.yaw))*0.25f,y=218+(-d.x*std::sin(p.yaw)+d.z*std::cos(p.yaw))*0.25f;circle(x,y,3,cyan,true,8);if(game.target==i)outline(x-6,y-6,12,12,orange);}
+    radar(game,245,160,170);
+    marquee(game,410,126,620,16);
     for(int i=0;i<int(game.enemies.size());++i) {
         const auto& e=game.enemies[i];if(!e.alive)continue;float x,y;
         if(project(e.pos+Vec3{0,7,0},x,y)&&y<570&&y>130){float s=clamp(2100/length(e.pos-p.pos),12,45);Color c=game.target==i?green:Color{0.14f,0.74f,0.13f,0.65f};outline(x-s,y-s,s*2,s*2,c,1.5f);if(game.target==i){line(x-s-10,y,x+s+10,y,c);line(x,y-s-10,x,y+s+10,c);}}
@@ -384,7 +424,7 @@ void Renderer::hud(const Combat& game,const UIState& ui) {
     else if(p.turboPower>0.1f)centered(720,506,p.turboEngaged?"TURBO ENGAGED":"TURBINE SPOOL-DOWN",13,cyan);
     if(game.messageTime>0&&game.ready()){rect(358,535,725,18,{0,0,0,0.45f});centered(720,536,game.message,10,cyan);}
     if(!game.ready()){
-        bevel(482,204,476,279,13,{0.025f,0.035f,0.035f});centered(720,228,"HERC INITIALIZATION",23,cyan);
+        bevel(482,204,476,279,13,{0.025f,0.035f,0.035f});centered(720,221,game.insertionAltitude()>0?"AIR-DROP INSERTION":"TOUCHDOWN // INITIALIZING",20,cyan);centered(720,248,game.insertionAltitude()>0?"ALTITUDE: "+num(game.insertionAltitude())+" M":"GROUND CONTACT CONFIRMED",13,label);
         const char* stages[]={"REACTOR IGNITION","SYSTEM DIAGNOSTICS","HYDRAULIC PRESSURE","ACTUATORS ONLINE"};
         int stage=int(game.startupStage());for(int i=0;i<4;++i){float y=276+i*37;text(508,y,stages[i],16,i<=stage?cream:label);text(864,y,i<stage?"OK":i==stage?"...":"--",16,i<stage?green:cyan);}
         bar(508,440,424,7,game.startupTime/startupDuration,cyan);
@@ -409,6 +449,7 @@ void Renderer::controls(const UIState&) {
     text(200,658,"Aim for legs to preserve salvage. Walk near green crates for alloy and repairs.",13,muted);
     text(200,688,"Clear all waves, then reach the green extraction beacon to bank your salvage.",13,muted);
     text(200,718,"F2 opens independent music, weapons, machinery and interface volumes.",13,muted);
+    text(200,748,"[ / ] adjusts radar range. Diamond: waypoint / extraction; squares: relays.",13,muted);
     button(200,788,260,57,"BACK TO OPERATIONS",Action::Back,true);
 }
 void Renderer::pause(const UIState&) {
@@ -427,7 +468,15 @@ void Renderer::debrief(const Combat& game,const UIState& ui) {
 }
 void Renderer::render(int width,int height,const Combat& game,const UIState& ui) {
     pixelWidth=std::max(1,width);pixelHeight=std::max(1,height);state=&ui;buttons.clear();glViewport(0,0,pixelWidth,pixelHeight);
-    glClearColor(0.06f,0.1f,0.09f,1);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    bool original=originalCockpitTexture && (ui.screen==Screen::Playing||ui.screen==Screen::Paused||ui.screen==Screen::Debrief);
+    viewAspect=float(pixelWidth)/pixelHeight;
+    glClearColor(0,0,0,1);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    if(original) {
+        // Preserve the source art's 4:3 proportions; projection and overlay share this viewport.
+        int h=std::min(pixelHeight,pixelWidth*3/4),w=h*4/3;
+        h=std::max(h,1);w=std::max(w,1);viewAspect=float(w)/h;
+        glViewport((pixelWidth-w)/2,(pixelHeight-h)/2,w,h);
+    }
     sky(ui.time);
     bool inMenu=ui.screen==Screen::Menu||ui.screen==Screen::Hangar||(ui.screen==Screen::Controls&&(ui.returnScreen==Screen::Menu||ui.returnScreen==Screen::Hangar));
     world(game,inMenu,ui.time);begin2D();
@@ -435,7 +484,12 @@ void Renderer::render(int width,int height,const Combat& game,const UIState& ui)
     else if(ui.screen==Screen::Hangar)hangar(ui);
     else if(ui.screen==Screen::Controls)controls(ui);
     else if(ui.screen==Screen::AudioSettings)audioSettings(ui);
-    else {hud(game,ui);if(ui.screen==Screen::Paused)pause(ui);else if(ui.screen==Screen::Debrief)debrief(game,ui);}
+    else {
+        if(original){begin2D(640,480);originalHud(game,ui);}else hud(game,ui);
+        // Menus keep their existing full-window layout and mouse coordinates.
+        glViewport(0,0,pixelWidth,pixelHeight);begin2D();
+        if(ui.screen==Screen::Paused)pause(ui);else if(ui.screen==Screen::Debrief)debrief(game,ui);
+    }
     if(ui.noticeTime>0){rect(380,100,680,36,panel);centered(720,109,ui.notice,12,mint);}
 }
 bool Renderer::screenshot(const std::string& path,int width,int height) {

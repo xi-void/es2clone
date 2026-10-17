@@ -1,4 +1,5 @@
 #include "simulation.hpp"
+#include "radar.hpp"
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -9,24 +10,62 @@ void tick(Combat& game,float seconds,Controls controls={}){for(int i=0;i<int(sec
 void removeHostiles(Combat& game){for(auto& e:game.enemies){e.alive=false;}game.spawned=missions[game.mission].enemies;}
 void ready(Combat& game,int chassis=0,int mission=0,int shields=0,int weapons=0){game.reset(chassis,mission,shields,weapons);while(!game.ready())game.update(1.0f/120,{});game.events.clear();}
 int main(){
+    Player sensor;sensor.pos={100,10,100};
+    auto north=radarPoint({100,800,-300},sensor,800),east=radarPoint({500,0,100},sensor,800);
+    expect(north.inRange&&std::abs(north.x)<0.001f&&std::abs(north.y+0.5f)<0.001f,"radar ignores elevation and places north ahead");
+    expect(east.inRange&&std::abs(east.x-0.5f)<0.001f&&std::abs(east.y)<0.001f,"radar places east to the right");
+    sensor.yaw=pi/2;east=radarPoint({500,0,100},sensor,800);
+    expect(std::abs(east.x)<0.001f&&std::abs(east.y+0.5f)<0.001f,"heading-up radar rotates with chassis");
+    auto far=radarPoint({10000,0,10000},sensor,800);
+    expect(!far.inRange&&std::abs(std::hypot(far.x,far.y)-1)<0.001f,"outside contacts are distinguishable from bounded waypoint bearings");
+    expect(radarRange(-1)==200&&radarRange(3000)==2400,"radar range stays usable");
     Combat game;ready(game);
+    for(int m=0;m<3;++m){
+        game.reset(0,m);auto layout=missionLayouts[m];
+        expect(length(game.player.pos-game.extraction)>1500,"insertion and extraction separated across battlefield");
+        expect(length(layout.sectors[0]-layout.insertion)>350&&length(layout.sectors[1]-layout.sectors[0])>500,"sectors have deliberate traversal distances");
+        bool clear=true;for(auto p:{layout.insertion,layout.extraction,layout.sectors[0],layout.sectors[1],layout.sectors[2]}){
+            p.y=terrainHeight(p.x,p.z)+3;clear&=!solidAt(p,4)&&std::abs(p.x)<battlefieldLimit&&std::abs(p.z)<battlefieldLimit;
+        }
+        expect(clear,"mission anchors lie inside bounds and clear of structures");
+    }
+    game.reset();float lastHeight=game.insertionAltitude();bool descending=true;
+    expect(lastHeight==45&&!game.statusMessages.empty(),"mission begins aloft with a marquee");
+    while(game.startupTime<3.55f){game.update(1.0f/120,{});float h=game.insertionAltitude();descending&=h<=lastHeight&&h>=0;lastHeight=h;}
+    expect(descending&&lastHeight==0&&!game.ready(),"insertion descends continuously to touchdown before control release");
+    while(!game.ready())game.update(1.0f/120,{});
+    expect(length(game.cameraEye()-game.eye())<0.0001f,"deployment offset clears completely after initialization");
+    for(bool legs:{false,true}) {
+        ready(game);game.statusMessages.clear();game.player.pos={0,terrainHeight(0,105),105};game.enemies.resize(1);
+        auto& victim=game.enemies[0];victim.pos={0,terrainHeight(0,50),50};victim.shield=0;victim.armor=victim.legs=10;
+        auto aim=normalized(victim.pos+Vec3{0,legs?2.7f:8.5f,0}-game.eye());game.player.pitch=std::asin(aim.y);
+        game.fire(0);
+        auto event=legs?Event::EnemyDisabled:Event::EnemyDestroyed;
+        expect(!victim.alive&&victim.legKill==legs,"weapon hitbox distinguishes leg disable from torso destruction");
+        expect(std::count_if(game.events.begin(),game.events.end(),[&](auto e){return e.type==event;})==1,"confirmed kill emits one matching voice event");
+        expect(std::count_if(game.events.begin(),game.events.end(),[](auto e){return e.type==Event::Explosion;})==1,"kill preserves the existing explosion event");
+        expect(game.statusMessages.front().text==(legs?"ENEMY TARGET DISABLED":"ENEMY TARGET DESTROYED"),"marquee reports the damage outcome");
+        auto events=game.events.size();game.damageEnemy(0,1000,legs);game.announce("SECTOR CLEAR");
+        expect(game.events.size()==events&&game.statusMessages.size()==1,"wreck damage does not repeat notification; other messages cannot replace it");
+    }
+    ready(game);
     expect(game.enemies.size()==3&&game.phase==Phase::Active,"initial wave and active mission");
     expect(game.player.armor==110&&game.player.missiles==10,"Nomad loadout");
     ready(game,1,2,2,1);expect(game.player.armor==165&&game.player.shield==170&&game.player.missiles==14,"chassis and upgrades applied");
     ready(game);removeHostiles(game);float z=game.player.pos.z;tick(game,2,{1,0,0,false,false,false});expect(game.player.pos.z<z-5,"forward movement accelerates");
     tick(game,2);expect(std::abs(game.player.speed)<0.5f,"movement decelerates on release");
-    tick(game,40,{1,0,0,false,false,false});expect(game.player.pos.z>=-310,"arena boundary");
+    tick(game,40,{1,0,0,false,false,false});expect(game.player.pos.z>=-battlefieldLimit,"battlefield boundary");
     ready(game);removeHostiles(game);game.damagePlayer(130);expect(game.player.shield==0&&game.player.armor==80,"shields absorb damage before armor");
     tick(game,4);expect(game.player.shield==0,"shield regeneration has delay");tick(game,3);expect(game.player.shield>15,"shield regeneration resumes");
     game.damagePlayer(1000);expect(game.phase==Phase::Lost&&game.player.armor==0,"fatal damage ends mission");float time=game.time;tick(game,1);expect(game.time==time,"finished simulation is frozen");
-    ready(game);game.enemies.resize(1);game.enemies[0].pos={0,terrainHeight(0,0),0};game.enemies[0].shield=0;game.enemies[0].cooldown=100;
+    ready(game);game.player.pos={0,terrainHeight(0,105),105};game.enemies.resize(1);game.enemies[0].pos={0,terrainHeight(0,0),0};game.enemies[0].shield=0;game.enemies[0].cooldown=100;
     float armor=game.enemies[0].armor;game.fire(0);expect(game.enemies[0].armor<armor,"laser hits aimed torso");armor=game.enemies[0].armor;game.fire(0);expect(game.enemies[0].armor==armor,"laser obeys cooldown");
     game.player.torso=1.2f;tick(game,0.4f);game.fire(0);expect(game.enemies[0].armor==armor,"off-target shot misses");
     ready(game);game.enemies.resize(1);game.enemies[0].shield=0;game.damageEnemy(0,1000,true);expect(game.enemies[0].legKill&&game.kills==1&&game.pickups[0].value==50,"leg destruction preserves extra salvage");
     game.player.armor=50;game.player.pos=game.pickups[0].pos;game.update(0.01f,{});expect(game.salvage==50&&game.player.armor==62,"salvage pickup and field repair");game.update(0.01f,{});expect(game.salvage==50,"pickup collected once");
     ready(game);removeHostiles(game);game.player.heat=98;game.fire(0);expect(game.player.overheated,"high heat triggers reactor shutdown");size_t beams=game.beams.size();game.fire(1);expect(game.beams.size()==beams,"overheat blocks weapons");tick(game,5.1f);expect(!game.player.overheated,"reactor recovers after cooling");
     ready(game);game.player.missiles=0;game.fire(2);expect(game.projectiles.empty()&&game.player.missiles==0,"empty missile rack cannot fire");
-    ready(game);game.enemies.resize(1);game.enemies[0].pos={0,terrainHeight(0,25),25};game.enemies[0].cooldown=100;float health=game.enemies[0].armor+game.enemies[0].shield;game.fire(2);expect(game.player.missiles==9&&game.projectiles.size()==1,"missile launches and consumes ammo");tick(game,2);expect(game.enemies[0].armor+game.enemies[0].shield<health,"guided missile reaches target");
+    ready(game);game.player.pos={0,terrainHeight(0,105),105};game.enemies.resize(1);game.enemies[0].pos={0,terrainHeight(0,25),25};game.enemies[0].cooldown=100;float health=game.enemies[0].armor+game.enemies[0].shield;game.fire(2);expect(game.player.missiles==9&&game.projectiles.size()==1,"missile launches and consumes ammo");tick(game,2);expect(game.enemies[0].armor+game.enemies[0].shield<health,"guided missile reaches target");
     ready(game);game.selectTarget();expect(game.target==0,"target selects first hostile");game.enemies[1].alive=false;game.selectTarget();expect(game.target==2,"target cycling skips wrecks");game.enemies.clear();game.selectTarget();expect(game.target==-1,"target cycling handles empty battlefield");
     for(int mission=0;mission<3;++mission){
         ready(game,0,mission);int guard=0;
@@ -45,7 +84,7 @@ int main(){
     // This pilot aims accurately, but receives damage and follows normal rules.
     for(int mission=0;mission<3;++mission){
         ready(game,mission,mission);
-        for(int frame=0;frame<120*240&&game.phase==Phase::Active;++frame){
+        for(int frame=0;frame<120*480&&game.phase==Phase::Active;++frame){
             Controls input;int target=-1;float nearest=10000;
             for(int i=0;i<int(game.enemies.size());++i)if(game.enemies[i].alive){float d=length(game.enemies[i].pos-game.player.pos);if(d<nearest){nearest=d;target=i;}}
             Vec3 destination=game.extraction;

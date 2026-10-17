@@ -38,14 +38,29 @@ The reviewed mapping CSV uses identifiers found in the original `SIMVOL0.VOL/str
 | --- | --- | --- |
 | Left/right contact | `FOOT2.WAV` | Foot identifier; shared recording, separate contact timing and stereo position |
 | Reactor loop | `HERCENG1.WAV` | HERC engine identifier |
+| Turbo activation | `THROTL.WAV` | Original `TURBO_POD` activation method calls sound 44; `SOUNDS.STR[44]` names this recording |
 | Startup, when album cue is absent | `START3.WAV` | Startup identifier |
 | Laser / autocannon / missile | `LASER1.WAV` / `BACANN4.WAV` / `MISSLE.WAV` | Weapon identifiers |
 | Impacts | `IMPACTS2/3/5.WAV` | Impact identifiers; cycling variants |
 | Explosions | `EXPLO1D/2/3.WAV` | Explosion identifiers; cycling variants |
 | Target lock | `TRGLOC.WAV` | Target-lock identifier |
 | Low armor / overheat | `WARN1.WAV` / `WRNWOOP2.WAV` | Generic warning identifiers, assigned to the clone's warnings; no claim of original condition-specific speech |
+| Enemy torso destruction | `CVM_0050.WAV` | `SYSTEM.STR` message 46 and verified CVM filename construction |
+| Enemy leg disable | `CVM_0051.WAV` | `SYSTEM.STR` message 47 and verified CVM filename construction |
 
-These are identifier-based assignments, not a reconstruction of every original sound ID. `THROTL`, `GNRACT`, `GNRDACT`, `MISSIN`, `GM_69`, and numbered voices are retained without assigning a specific meaning. In particular, throttle is not assumed to mean turbo, and generic activation is not assumed to mean hydraulic movement. Turbo engage/release, hydraulic actuation, shutdown, and unidentified notifications retain procedural fallback. The original FOOT2 recording has one timbre; left/right distinction comes from placement, not invented alternate originals or pitch shifting.
+These are identifier-based assignments, not a reconstruction of every original sound ID. `GNRACT`, `GNRDACT`, `MISSIN`, `GM_69`, and numbered voices are retained without assigning a specific meaning. Turbo activation was subsequently verified directly in the supplied `DBSIM.EXE`: the `TURBO_POD` vtable at `0x498bec` references method `0x40f1f0`, which calls sound 44 at `0x40f244` when activating. That zero-based sound-table entry is `throtl.wav`. Generic activation is not assumed to mean hydraulic movement. Turbo release, hydraulic actuation, shutdown, and unidentified notifications retain procedural fallback. The original FOOT2 recording has one timbre; left/right distinction comes from placement, not invented alternate originals or pitch shifting.
+
+## Kill notification identification
+
+The supplied `SIMVOL0.VOL/str/SYSTEM.STR` ties message 46, `ENEMY TARGET DESTROYED`, to metadata `2e 00 00 03 06 00 14 32`; message 47, `ENEMY TARGET DISABLED`, has `2f 00 00 03 06 00 14 33`. The final byte is the voice number, not the message index. This was verified in the supplied `DBSIM.EXE` (SHA-256 `33600748810578667ca513841406bbb4f4990eee463a8a041ea09ebd12730df3`):
+
+- At `0x434fa2`, message construction copies metadata byte 7 into the runtime message's byte `+0x2c`.
+- At `0x436c8d`, computer speech starts with the filename template `CVM_0000`; `0x436ca4` reads that voice byte, and the following decimal division fills the last two digits before WAV playback.
+- Thus `0x32` / `0x33` select **50 / 51**, not recordings 46 / 47.
+
+The already extracted `SIMVOICE.VOL/SIMVOICE/CVM_0050.WAV` and `CVM_0051.WAV` are unsigned 8-bit mono PCM at 22,050 Hz, approximately 2.27 seconds each. Only these two files were copied unchanged into the audio directory; the library was not regenerated or re-extracted. Their SHA-256 values are `3eeb7a6a2f8bdef668e7df9fded70444731e9626e006b26ade9b96d62852f4d8` and `d43b04514cf7b5469ce387a1f667ba6acc98db55e15d58d348aa1c833cb12803` respectively.
+
+The `enemy_destroyed` and `enemy_disabled` associations are additions. Existing explosion, footstep, turbo, weapon, warning, reactor and music associations and settings are unchanged. Future imports use the two additional reviewed CSV rows. Other unidentified numbered voices remain unmapped.
 
 ## Inventory and manual mapping
 
