@@ -13,7 +13,7 @@ namespace fs=std::filesystem;
 using namespace siege;
 
 struct Options {
-    bool smoke=false,mute=false,prototypeCockpit=false;
+    bool smoke=false,mute=false,prototypeCockpit=false,prototypeModels=false;
     int frames=0,width=0,height=0;
     float radarMeters=defaultRadarRange;
     std::string screenshot,scene="menu",saveDir,audioDir,audioConfig,audioCapture,originalDir;
@@ -21,9 +21,9 @@ struct Options {
 static void help() {
     std::cout<<"OpenEarthSiege 2 - native Linux compatibility prototype\n\n"
              <<"Usage: earthsiege [--mute] [--save-dir PATH] [--audio-dir PATH] [--audio-config FILE] [--audio-capture FILE.wav]\n"
-             <<"       earthsiege --smoke-test [--scene menu|hangar|startup|combat|pause|controls|audio|debrief|flow]\n"
+             <<"       earthsiege --smoke-test [--scene menu|hangar|startup|combat|pause|controls|audio|debrief|flow|waypoints|models]\n"
              <<"                  [--frames N] [--screenshot image.ppm] [--save-dir PATH]\n\n"
-             <<"Original cockpit: [--original-dir PATH] [--prototype-cockpit]\n\n"
+             <<"Original assets: [--original-dir PATH] [--prototype-cockpit] [--prototype-models]\n\n"
              <<"Window size: --size WIDTHxHEIGHT (also applies to smoke screenshots)\n\n"
              <<"Radar: --radar-range METERS (200-2400); [ / ] adjust range in flight\n\n"
              <<"W/S move; A/D turn; Q/E strafe; mouse aims torso; C centers torso\n"
@@ -42,7 +42,7 @@ static void load(UIState& ui,const std::string& directory) {
     std::string version;int bank=0,shield=0,weapon=0,completed=0,chassis=0,mission=0,mute=0;
     if(file>>version>>bank>>shield>>weapon>>completed>>chassis>>mission>>mute&&(version=="ESR1"||version=="ESR2")) {
         ui.bank=std::clamp(bank,0,1000000);ui.shieldUpgrade=std::clamp(shield,0,3);ui.weaponUpgrade=std::clamp(weapon,0,3);
-        ui.completed=std::clamp(completed,0,3);ui.chassis=std::clamp(chassis,0,2);ui.mission=std::clamp(mission,0,2);ui.muted=mute!=0;
+        ui.completed=std::clamp(completed,0,campaignMissionCount);ui.chassis=std::clamp(chassis,0,2);ui.mission=std::clamp(mission,0,missionCount-1);ui.muted=mute!=0;
         if(version=="ESR2")for(float& volume:ui.volumes){float value;if(file>>value&&std::isfinite(value))volume=clamp(value,0,1);}
     }
 }
@@ -62,6 +62,7 @@ int main(int argc,char** argv) {
             else if(arg=="--smoke-test")options.smoke=true;
             else if(arg=="--mute")options.mute=true;
             else if(arg=="--prototype-cockpit")options.prototypeCockpit=true;
+            else if(arg=="--prototype-models")options.prototypeModels=true;
             else if(arg=="--original-dir")options.originalDir=value();
             else if(arg=="--radar-range") {
                 auto v=value();size_t parsed=0;float meters=std::stof(v,&parsed);
@@ -84,9 +85,10 @@ int main(int argc,char** argv) {
             else throw std::runtime_error("Unknown argument: "+arg);
         } catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 2;}
     }
-    if(options.scene!="menu"&&options.scene!="hangar"&&options.scene!="startup"&&options.scene!="combat"&&options.scene!="pause"&&options.scene!="controls"&&options.scene!="audio"&&options.scene!="debrief"&&options.scene!="flow"){std::cerr<<"Unknown scene\n";return 2;}
+    if(options.scene!="menu"&&options.scene!="hangar"&&options.scene!="startup"&&options.scene!="combat"&&options.scene!="pause"&&options.scene!="controls"&&options.scene!="audio"&&options.scene!="debrief"&&options.scene!="flow"&&options.scene!="waypoints"&&options.scene!="models"){std::cerr<<"Unknown scene\n";return 2;}
     if(!options.smoke&&options.scene!="menu"){std::cerr<<"--scene requires --smoke-test\n";return 2;}
-    if(options.smoke&&options.frames==0)options.frames=120;
+    if(options.smoke&&options.frames==0)options.frames=options.scene=="waypoints"?9000:120;
+    if(options.smoke&&options.scene=="models")options.frames=std::max(options.frames,540);
     if(options.saveDir.empty())options.saveDir=options.smoke?(fs::temp_directory_path()/"earthsiege-smoke").string():dataDirectory();
     // Audio is optional; video initialization must not depend on an audio device.
     if(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS|SDL_INIT_TIMER)!=0){std::cerr<<"SDL video initialization failed: "<<SDL_GetError()<<'\n';return 1;}
@@ -110,11 +112,10 @@ int main(int argc,char** argv) {
     if(!fs::exists(assets/"fonts/Display.ttf"))assets=fs::current_path()/"assets";
     Renderer renderer;
     if(!renderer.init(assets.string())){renderer.destroy();SDL_GL_DeleteContext(context);SDL_DestroyWindow(window);TTF_Quit();SDL_Quit();return 1;}
-    if(!options.prototypeCockpit) {
-        fs::path originalRoot=options.originalDir.empty()?assets/"original":fs::path(options.originalDir);
-        if(options.originalDir.empty()&&fs::exists(executable/"../assets/original/TOMAHAWK.HB0"))originalRoot=executable/"../assets/original";
-        renderer.loadOriginalCockpit(originalRoot.string());
-    }
+    fs::path originalRoot=options.originalDir.empty()?assets/"original":fs::path(options.originalDir);
+    if(options.originalDir.empty()&&fs::exists(executable/"../assets/original"))originalRoot=executable/"../assets/original";
+    if(!options.prototypeCockpit)renderer.loadOriginalCockpit(originalRoot.string());
+    if(!options.prototypeModels)renderer.loadOriginalModels((originalRoot/"models").string());
     fs::path audioRoot=options.audioDir.empty()?assets/"audio":fs::path(options.audioDir);
     if(options.audioDir.empty()&&fs::exists(executable/"../assets/audio/audio.ini"))audioRoot=executable/"../assets/audio";
     Audio audio;
@@ -131,7 +132,7 @@ int main(int argc,char** argv) {
         if(action!=Action::None)audio.play(Event::Lock);
         switch(action){
         case Action::Launch:case Action::Retry:launch();break;
-        case Action::Next:ui.mission=(ui.mission+1)%3;launch();break;
+        case Action::Next:if(!game.testMission())ui.mission=(ui.mission+1)%campaignMissionCount;launch();break;
         case Action::Hangar:ui.screen=Screen::Hangar;capture(false);audio.reset();audio.play(Event::ReactorShutdown);break;
         case Action::Back:if(ui.screen==Screen::Controls||ui.screen==Screen::AudioSettings)ui.screen=ui.returnScreen;else ui.screen=Screen::Menu;break;
         case Action::Controls:ui.returnScreen=ui.screen;ui.screen=Screen::Controls;capture(false);break;
@@ -141,8 +142,8 @@ int main(int argc,char** argv) {
         case Action::Fullscreen:ui.fullscreen=!ui.fullscreen;if(SDL_SetWindowFullscreen(window,ui.fullscreen?SDL_WINDOW_FULLSCREEN_DESKTOP:0)!=0){ui.fullscreen=!ui.fullscreen;notify("Fullscreen unavailable on this display.");}break;
         case Action::PrevChassis:ui.chassis=(ui.chassis+2)%3;persist();break;
         case Action::NextChassis:ui.chassis=(ui.chassis+1)%3;persist();break;
-        case Action::PrevMission:ui.mission=(ui.mission+2)%3;persist();break;
-        case Action::NextMission:ui.mission=(ui.mission+1)%3;persist();break;
+        case Action::PrevMission:ui.mission=(ui.mission+missionCount-1)%missionCount;persist();break;
+        case Action::NextMission:ui.mission=(ui.mission+1)%missionCount;persist();break;
         case Action::Resume:ui.screen=Screen::Playing;capture(true);break;
         case Action::ShieldUpgrade:{int cost=80+ui.shieldUpgrade*40;if(ui.shieldUpgrade<3&&ui.bank>=cost){ui.bank-=cost;++ui.shieldUpgrade;persist();notify("Shield capacitor upgraded across all HERCs.");}break;}
         case Action::WeaponUpgrade:{int cost=100+ui.weaponUpgrade*50;if(ui.weaponUpgrade<3&&ui.bank>=cost){ui.bank-=cost;++ui.weaponUpgrade;persist();notify("Weapon amplifier upgraded across all HERCs.");}break;}
@@ -167,9 +168,28 @@ int main(int argc,char** argv) {
     }
     uint64_t previous=SDL_GetPerformanceCounter();double frequency=double(SDL_GetPerformanceFrequency());int frame=0,exitCode=0;float accumulated=0;
     float pausedTime=0;
+    int waypointVoices=0;float rangeFinishedAt=-1;
     while(running){
         uint64_t now=SDL_GetPerformanceCounter();float dt=options.smoke&&options.audioCapture.empty()?1.0f/60:std::min(float(double(now-previous)/frequency),0.1f);previous=now;
         ui.time+=dt;ui.noticeTime=std::max(0.0f,ui.noticeTime-dt);
+        if(options.smoke&&(options.scene=="waypoints"||options.scene=="models")) {
+            int testMission=options.scene=="waypoints"?waypointTestMission:modelTestMission;
+            auto key=[&](SDL_Keycode code){SDL_Event e{};e.type=SDL_KEYDOWN;e.key.keysym.sym=code;SDL_PushEvent(&e);};
+            if(frame==1)for(int i=0;i<testMission;++i)key(SDLK_RIGHT); // Existing operation selector.
+            if(frame==2){
+                UIState restored;load(restored,options.saveDir);
+                if(ui.mission!=testMission||restored.mission!=testMission){std::cerr<<"Test range: mission selection/persistence failed\n";exitCode=1;running=false;}
+                key(SDLK_RETURN);
+            }
+            if(frame==3)key(SDLK_ESCAPE);
+            if(frame==4){ // Exercise the existing restart button before flying the route.
+                SDL_Event e{};e.type=SDL_MOUSEBUTTONUP;e.button.button=SDL_BUTTON_LEFT;e.button.x=700*width/1440;e.button.y=550*height/900;SDL_PushEvent(&e);
+            }
+            if(frame==5&&(ui.screen!=Screen::Playing||game.mission!=testMission||game.wave!=1||game.enemies.size()!=(testMission==modelTestMission?2u:0u))){
+                std::cerr<<"Test range: launch/restart failed\n";exitCode=1;running=false;
+            }
+            if(options.scene=="models"&&frame==390)key(SDLK_t);
+        }
         if(options.smoke&&options.scene=="flow") {
             auto check=[&](bool result,const char* name){if(!result){std::cerr<<"UI flow FAIL: "<<name<<'\n';exitCode=1;running=false;}};
             auto click=[&](int x,int y){SDL_Event e{};e.type=SDL_MOUSEBUTTONUP;e.button.button=SDL_BUTTON_LEFT;e.button.x=x*width/1440;e.button.y=y*height/900;SDL_PushEvent(&e);};
@@ -220,7 +240,7 @@ int main(int argc,char** argv) {
                 else if(ui.screen==Screen::Playing){if(key>=SDLK_1&&key<=SDLK_3)game.player.weapon=int(key-SDLK_1);if(key==SDLK_t||key==SDLK_TAB)game.selectTarget();if(key==SDLK_c){game.player.torso=0;game.player.pitch=0;}if(key==SDLK_LEFTBRACKET)ui.radarMeters=radarRange(ui.radarMeters-200);if(key==SDLK_RIGHTBRACKET)ui.radarMeters=radarRange(ui.radarMeters+200);}
                 else if(ui.screen==Screen::Menu||ui.screen==Screen::Hangar){if(key==SDLK_RETURN)act(Action::Launch);if(key==SDLK_h)act(Action::Hangar);if(key==SDLK_LEFT)act(ui.screen==Screen::Hangar?Action::PrevChassis:Action::PrevMission);if(key==SDLK_RIGHT)act(ui.screen==Screen::Hangar?Action::NextChassis:Action::NextMission);}
                 else if(ui.screen==Screen::Paused&&key==SDLK_RETURN)act(Action::Resume);
-                else if(ui.screen==Screen::Debrief&&key==SDLK_RETURN)act(game.phase==Phase::Won?Action::Next:Action::Retry);
+                else if(ui.screen==Screen::Debrief&&key==SDLK_RETURN)act(game.phase==Phase::Won&&!game.testMission()?Action::Next:Action::Retry);
             }
         }
         bool simulated=ui.screen==Screen::Playing;
@@ -233,22 +253,42 @@ int main(int argc,char** argv) {
                 if(!options.audioCapture.empty()){
                     float t=game.startupTime+game.time;input.throttle=t>=7&&t<19?1:0;input.boost=t>=11&&t<16;input.turn=t>=10?0.4f:0;
                 }
+                if(options.scene=="waypoints") {
+                    Vec3 delta=game.navigationPoint()-game.player.pos;
+                    float heading=std::remainder(std::atan2(delta.x,-delta.z)-game.player.yaw,2*pi);
+                    input={};input.turn=clamp(heading*4,-1,1);input.throttle=std::abs(heading)<0.35f?1:0;
+                }
+                if(options.scene=="models"){input={};input.throttle=0.35f;}
             }
             accumulated+=dt;
             while(accumulated>=1.0f/120){game.update(1.0f/120,input);accumulated-=1.0f/120;}
-            if(game.phase!=Phase::Active){ui.screen=Screen::Debrief;capture(false);if(game.phase==Phase::Won&&!banked){ui.bank+=game.salvage;ui.completed=std::max(ui.completed,ui.mission+1);banked=true;persist();}}
+            if(game.phase!=Phase::Active){ui.screen=Screen::Debrief;capture(false);if(game.phase==Phase::Won&&!banked){if(!game.testMission()){ui.bank+=game.salvage;ui.completed=std::max(ui.completed,ui.mission+1);}banked=true;persist();}}
         } else {accumulated=0;}
         audio.setSuspended(ui.screen!=Screen::Playing);
         bool missionScreen=ui.screen==Screen::Playing||ui.screen==Screen::Paused||
             ((ui.screen==Screen::Controls||ui.screen==Screen::AudioSettings)&&ui.returnScreen==Screen::Paused);
         audio.setMusicActive(missionScreen?game.ready():audio.assetInfo().config.menuMusic);
         audio.setDrive({clamp(game.startupTime/2.1f,0,1),clamp(game.player.gait.speed/game.player.maxSpeed,0,1.6f),std::abs(game.player.gait.load),game.player.mass,game.player.turboPower});
-        if(simulated)for(const auto& event:game.events)audio.play(event);
+        if(simulated)for(const auto& event:game.events){
+            audio.play(event);
+            if(options.smoke&&options.scene=="waypoints"&&event.type==Event::WaypointReached){
+                ++waypointVoices;
+                if(game.wave!=std::min(5,waypointVoices+1)||waypointVoices>5){std::cerr<<"Waypoint flow: arrival order/count failed\n";exitCode=1;running=false;}
+            }
+        }
         game.events.clear();
         SDL_GL_GetDrawableSize(window,&width,&height);renderer.render(width,height,game,ui);
         ++frame;
-        if(options.smoke&&!options.audioCapture.empty()&&ui.time>=21)running=false;
+        if(options.smoke&&options.scene=="waypoints"&&game.phase==Phase::Won){
+            if(rangeFinishedAt<0)rangeFinishedAt=ui.time;
+            // Let final speech finish through the real SDL callback in debrief.
+            if(ui.time-rangeFinishedAt>=3)options.frames=frame;
+        }
+        if(options.smoke&&!options.audioCapture.empty()&&options.scene!="waypoints"&&ui.time>=21)running=false;
         if(options.frames>0&&frame>=options.frames){
+            if(options.scene=="models"&&(!game.ready()||game.player.gait.contacts==0||game.target<0)){
+                std::cerr<<"Model range: startup/movement/targeting failed\n";exitCode=1;
+            }
             if(!options.screenshot.empty()&&!renderer.screenshot(options.screenshot,width,height)){std::cerr<<"Screenshot write failed\n";exitCode=1;}
             GLenum error=glGetError();if(error!=GL_NO_ERROR){std::cerr<<"OpenGL error: "<<error<<'\n';exitCode=1;}
             running=false;
@@ -259,6 +299,10 @@ int main(int argc,char** argv) {
             if(spent<1.0/60)SDL_Delay(Uint32((1.0/60-spent)*1000));
         }
         if(!options.smoke&&SDL_GL_GetSwapInterval()==0)SDL_Delay(8);
+    }
+    if(options.smoke&&options.scene=="waypoints") {
+        bool ok=waypointVoices==5&&game.phase==Phase::Won&&game.wave==5&&ui.screen==Screen::Debrief&&ui.bank==0&&ui.completed==0;
+        std::cout<<"Waypoint UI/runtime: "<<waypointVoices<<" arrivals; "<<(ok?"PASS":"FAIL")<<'\n';if(!ok)exitCode=1;
     }
     if(!options.smoke)persist();
     if(!options.audioCapture.empty()){

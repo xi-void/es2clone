@@ -54,6 +54,21 @@ The first integrated frame represents **Tomahawk artwork**, not a claim that the
 
 Capture controlled original-game gameplay and cockpit sequences for behavioral comparisons; establish terrain/mission formats from actual files; select a project source-code license before presenting a public release as licensed open source. No original recordings or graphical resources should be relicensed as engine code. None of this blocks the first cockpit increment.
 
+## Original HERC proof pair (2026-10-17)
+
+The [original-model increment](original-models.md) supersedes the DTS-placeholder
+status above for the **Tomahawk and Achilles base chassis only**. It reads their
+early 3Space geometry, original DBA/DPL materials, articulated hierarchy and walk
+keyframes. The small HERC Model Test Range is operation 05 / 05. Existing 4:3
+presentation, cockpit, collision/gameplay rules and audio associations remain.
+
+The first pair is inspectable and animated. Separate interchangeable gun meshes,
+exact shade/haze behavior, full animation transitions and the remaining roster
+are still unfinished. Confirm loadout/attachment bindings and compare footage
+from the original before broadening the verified import set. Original chassis
+statistics and exact hit volumes remain milestone 5; loading artwork does not
+establish those behaviors.
+
 ## Battlefield and HUD follow-up
 
 The [battlefield increment](battlefield.md) adds a functional heading-up radar, 2.4 km-square custom mission layouts, startup-timed insertion, and mission/kill marquees. Computer kill voice IDs 50/51 are verified through SYSTEM.STR and original executable references. Every earlier sound association is retained. Cockpit target occlusion and coordinate scaling are corrected without changing the source artwork or gait.

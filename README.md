@@ -35,6 +35,26 @@ python3 tools/import_original_graphics.py original/Earthsiege2_Freeware_HiRezStu
 
 This reads only the needed archive and copies two graphics resources into ignored `assets/original/`; it leaves every audio association unchanged. The game loads the original bitmap and palette directly, preserving 4:3 proportions, and moves the frame/instruments with the existing foot-contact suspension. Current instrument text and behavior remain approximate. `--prototype-cockpit` selects the previous artwork; missing or invalid graphics also use it. See [formats, import paths, inspection and limitations](docs/original-graphics.md).
 
+## Original HERC proof pair
+
+Import the original human Tomahawk and Cybrid Achilles base chassis:
+
+```sh
+python3 tools/import_original_models.py original/Earthsiege2_Freeware_HiRezStudios_1r0.iso
+./run.sh
+```
+
+The engine reads their original geometry, textures and articulated walk poses.
+Select **operation 05 / 05 — HERC Model Test Range** to inspect and fight both on
+flat terrain. Nomad uses Tomahawk artwork; type-0 enemies use Achilles artwork.
+Other chassis retain fallback models. `--prototype-models` restores all previous
+models. The cockpit, 4:3 presentation and audio mappings are unchanged.
+
+This is a base-chassis proof of concept: external interchangeable gun attachments,
+full animation semantics and exact original lighting remain unfinished. See
+[formats, test controls, verification and remaining limits](docs/original-models.md).
+Original files stay in ignored `assets/original/models/` and are not packaged.
+
 ## Play the current prototype
 
 Select an operation on the title screen, or open **Hangar** to choose a HERC. Press **Enter** or click **Deploy HERC**. See the in-game field manual with **F1**.
@@ -66,6 +86,8 @@ Mission start and kills appear in a cyan cockpit marquee. Leg kills report **ENE
 Shields regenerate five seconds after the last hit. Weapons shut down at maximum reactor heat until the reactor cools below 42%. Guided missiles home on a target in front of you; laser and cannon shots require aiming. Buildings block movement and fire. Disabling enemy legs preserves more salvage than destroying the torso. Walk within 19 meters of a green salvage crate to collect it and repair 12 armor.
 
 Spend banked salvage in the hangar on shield capacitors and weapon amplifiers. Upgrades apply to all three chassis. The **65-tonne Nomad** is balanced, **100-tonne Bastion** trades speed for armor and firepower, and **40-tonne Strider** favors mobility. These are prototype loadouts, not original HERC specifications. Three custom operations increase the size and strength of the enemy force. All use the same generated volcanic battlefield; original terrain is a separate compatibility milestone.
+
+**Waypoint Test Range** is operation **04 / 05**, after Last Light in the title-screen selector (press **Right** three times from Dust to Dust). Deploy into a flat, enemy-free range and follow WP1–WP5 on the compass, radar and ground beacon. Each arrival plays the installed original “Waypoint Reached” voice once and activates the next point; WP5 completes the test. **Restart Test** repeats the route without changing campaign progress or awarding salvage. See [diagnosis, route and verification](docs/waypoint-test-range.md).
 
 ## Machinery and music
 
@@ -125,7 +147,7 @@ ctest --test-dir build --output-on-failure
 
 Simulation tests exercise combat and a simulated pilot completing all three operations. Locomotion tests compare contact events to foot poses, check alternating steps, stops, walls, reverse/strafe/pivot, startup interlocks, weight, turbo transitions, and camera bounds. Audio tests measure stereo balance, bass energy, bus isolation, continuity, mute/pause, headroom, voice limits, and actual SDL callback output. CTest uses SDL's dummy audio driver, so it needs no speakers or display.
 
-Native smoke tests create actual SDL/OpenGL contexts, render all nine screens/scenarios, check GL errors, and exercise menu clicks, hotkeys, upgrades, pause, restart, independent music volume, and save persistence through SDL events.
+Native smoke tests create actual SDL/OpenGL contexts, render ten screens/scenarios, check GL errors, and exercise menu clicks, hotkeys, upgrades, pause, restart, independent music volume, and save persistence through SDL events. The model scenario selects and restarts the new range, then checks movement and targeting.
 
 Graphics tests use synthetic DBM/DBA/DPL data, validate bounds and alignment, and check import/package isolation. With the supplied extraction, `./build/original_graphics_tests imported/from-iso/resources/VOL/SIMVOL0.VOL` also checks all nine original cockpit frames. Native smoke tests automatically use the imported Tomahawk frame when present.
 

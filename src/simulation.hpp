@@ -25,21 +25,31 @@ inline float clamp(float x,float lo,float hi) { return std::clamp(x,lo,hi); }
 inline Vec3 direction(float yaw,float pitch=0) { return {std::sin(yaw)*std::cos(pitch),std::sin(pitch),-std::cos(yaw)*std::cos(pitch)}; }
 float terrainHeight(float x,float z);
 constexpr float battlefieldLimit=1200;
-struct MissionLayout { Vec3 insertion; std::array<Vec3,3> sectors; Vec3 extraction; };
-extern const MissionLayout missionLayouts[3];
+constexpr float waypointArrivalRadius=24;
+constexpr int campaignMissionCount=3,waypointTestMission=campaignMissionCount,modelTestMission=campaignMissionCount+1,missionCount=campaignMissionCount+2;
+struct MissionLayout {
+    Vec3 insertion;
+    std::array<Vec3,5> sectors;
+    Vec3 extraction;
+    int routeWaypoints=0; // Nonzero: arrival advances the route instead of combat waves.
+    bool flat=false;
+    float limit=battlefieldLimit;
+};
+extern const MissionLayout missionLayouts[missionCount];
 struct Landmark { Vec3 pos; const char* name; float height; };
 extern const std::array<Landmark,4> landmarks;
 struct Obstacle { Vec3 center,halfSize; };
 const std::vector<Obstacle>& obstacles();
 bool solidAt(Vec3 position,float radius=0);
-struct Chassis { const char* name; const char* role; float armor,shield,speed; int missiles; float damage,mass; };
+enum class HercAppearance { Automatic, Prototype, Tomahawk, Achilles };
+struct Chassis { const char* name; const char* role; float armor,shield,speed; int missiles; float damage,mass; HercAppearance appearance=HercAppearance::Prototype; };
 extern const Chassis chassis[3];
 struct Mission { const char* name; const char* region; const char* brief; int enemies; float enemyPower; };
-extern const Mission missions[3];
+extern const Mission missions[missionCount];
 enum class Phase { Active, Won, Lost };
 enum class Event { Laser, Cannon, Missile, Impact, Explosion, Lock, Wave, Win, Lose, Overheat,
     FootLeft, FootRight, HydraulicLeft, HydraulicRight, ReactorIgnition, SystemInit, MechanicalActivate, ReactorReady,
-    TurboEngage, TurboRelease, ReactorShutdown, DamageWarning, EnemyDestroyed, EnemyDisabled, Count };
+    TurboEngage, TurboRelease, ReactorShutdown, DamageWarning, EnemyDestroyed, EnemyDisabled, WaypointReached, Count };
 struct SoundEvent {
     Event type;
     float strength=1,pan=0,mass=65,activity=0;
@@ -77,6 +87,7 @@ struct Player {
 };
 struct Enemy {
     int id=0,type=0;
+    HercAppearance appearance=HercAppearance::Automatic; // Visual identity only; combat stats stay in type.
     Vec3 pos;
     float yaw=0,armor=100,maxArmor=100,shield=45,maxShield=45,legs=65;
     float cooldown=0,sinceHit=0,flash=0,deathTime=0;
@@ -103,6 +114,8 @@ struct Combat {
     std::deque<CockpitMessage> statusMessages;
     Vec3 extraction{0,0,-225};
     bool extractionOpen=false;
+    int arrivalWaypoint=0;
+    bool waypointArrivalReported=false;
     std::mt19937 rng{2624};
     void reset(int selectedChassis=0,int selectedMission=0,int shieldUpgrades=0,int weaponUpgrades=0);
     void update(float dt,const Controls& input);
@@ -122,6 +135,10 @@ struct Combat {
     StartupStage startupStage() const;
     float insertionAltitude() const;
     Vec3 navigationPoint() const;
+    bool navigationOnly() const { return missionLayouts[mission].routeWaypoints>0; }
+    bool testMission() const { return mission>=campaignMissionCount; }
+    float groundHeight(float x,float z) const { return missionLayouts[mission].flat?0:terrainHeight(x,z); }
+    bool blockedAt(Vec3 p,float radius=0) const { return !missionLayouts[mission].flat&&solidAt(p,radius); }
     Vec3 aim() const;
     float random(float low,float high);
 };

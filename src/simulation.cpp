@@ -1,21 +1,26 @@
 #include "simulation.hpp"
+#include "test_missions.hpp"
 #include <limits>
 
 namespace siege {
 const Chassis chassis[3] = {
-    {"NOMAD", "MEDIUM / MULTIROLE",110,100,13,10,1.0f,65},
+    {"NOMAD", "MEDIUM / MULTIROLE",110,100,13,10,1.0f,65,HercAppearance::Tomahawk},
     {"BASTION", "HEAVY / ASSAULT",165,130,9,14,1.15f,100},
     {"STRIDER", "LIGHT / RECON",80,80,18,8,0.95f,40}
 };
-const Mission missions[3] = {
+const Mission missions[missionCount] = {
     {"DUST TO DUST","CINDER BASIN", "Eliminate the Cybrid patrol. Recover salvage. Reach extraction.",4,0.75f},
     {"BROKEN SIGNAL","RELAY STATION 09", "Break through the relay defenders and secure the extraction zone.",6,1.0f},
-    {"LAST LIGHT","THE ASH FRONT", "Destroy the assault force. The resistance is counting on you.",8,1.25f}
+    {"LAST LIGHT","THE ASH FRONT", "Destroy the assault force. The resistance is counting on you.",8,1.25f},
+    testMissions::waypointRange,
+    testMissions::modelRange
 };
-const MissionLayout missionLayouts[3] = {
+const MissionLayout missionLayouts[missionCount] = {
     {{0,0,650}, {{{0,0,260},{380,0,-250},{-280,0,-760}}}, {150,0,-1020}},
     {{-650,0,650}, {{{-520,0,280},{0,0,-260},{460,0,-700}}}, {620,0,-980}},
-    {{640,0,690}, {{{550,0,300},{50,0,-300},{-450,0,-760}}}, {-650,0,-1020}}
+    {{640,0,690}, {{{550,0,300},{50,0,-300},{-450,0,-760}}}, {-650,0,-1020}},
+    testMissions::waypointRangeLayout,
+    testMissions::modelRangeLayout
 };
 const std::array<Landmark,4> landmarks{{
     {{-180,0,340},"LANDING RELAY",48}, {{-105,0,-220},"OLD OUTPOST",48},
@@ -85,11 +90,11 @@ float Combat::insertionAltitude() const {
 }
 Vec3 Combat::navigationPoint() const {
     if(extractionOpen)return extraction;
-    Vec3 point=missionLayouts[mission].sectors[size_t(std::clamp(wave-1,0,2))];
-    // Follow the remaining defenders after they leave their initial guard position.
-    float nearest=1e9f;
-    for(const auto& e:enemies)if(e.alive){float d=length(e.pos-player.pos);if(d<nearest){nearest=d;point=e.pos;}}
-    point.y=terrainHeight(point.x,point.z);return point;
+    const auto& layout=missionLayouts[mission];
+    int count=navigationOnly()?layout.routeWaypoints:3;
+    // Navigation anchors belong to the mission, not to moving/selected enemies.
+    Vec3 point=layout.sectors[size_t(std::clamp(wave-1,0,count-1))];
+    point.y=groundHeight(point.x,point.z);return point;
 }
 float Combat::cameraRoll() const { return player.gait.sway*0.06f; }
 StartupStage Combat::startupStage() const {
@@ -105,7 +110,7 @@ void Combat::status(const std::string& text) {
 }
 void Combat::reset(int selectedChassis,int selectedMission,int shieldUpgrades,int weaponUpgrades) {
     *this=Combat{};
-    chassisIndex=std::clamp(selectedChassis,0,2); mission=std::clamp(selectedMission,0,2);
+    chassisIndex=std::clamp(selectedChassis,0,2); mission=std::clamp(selectedMission,0,missionCount-1);
     const auto& c=chassis[chassisIndex];
     player.maxArmor=player.armor=c.armor;
     player.maxShield=player.shield=c.shield+std::clamp(shieldUpgrades,0,3)*20;
@@ -113,9 +118,9 @@ void Combat::reset(int selectedChassis,int selectedMission,int shieldUpgrades,in
     player.damage=c.damage*(1+std::clamp(weaponUpgrades,0,3)*0.12f);
     player.pos=missionLayouts[mission].insertion;
     extraction=missionLayouts[mission].extraction;
-    player.pos.y=terrainHeight(player.pos.x,player.pos.z);
-    extraction.y=terrainHeight(extraction.x,extraction.z);
-    spawnWave();
+    player.pos.y=groundHeight(player.pos.x,player.pos.z);
+    extraction.y=groundHeight(extraction.x,extraction.z);
+    if(navigationOnly())wave=1;else spawnWave();
     events.clear();events.emplace_back(Event::ReactorIgnition,1,0,c.mass);
     announce("REACTOR // Containment established. Ignition sequence.",startupDuration);
     status(std::string("MISSION START // ")+missions[mission].name);
@@ -127,7 +132,11 @@ void Combat::spawnWave() {
         Enemy e;
         e.id=spawned++; e.type=(e.id+mission)%3;
         e.pos=missionLayouts[mission].sectors[size_t(std::clamp(wave-1,0,2))]+Vec3{float(i-1)*52+random(-10,10),0,-float(i)*36};
-        e.pos.y=terrainHeight(e.pos.x,e.pos.z);
+        if(mission==modelTestMission) {
+            e.type=0;e.pos={i==0?-18.0f:18.0f,0,-30};
+            e.appearance=i==0?HercAppearance::Tomahawk:HercAppearance::Achilles;
+        }
+        e.pos.y=groundHeight(e.pos.x,e.pos.z);
         e.maxArmor=e.armor=72+e.type*22+mission*10;
         e.maxShield=e.shield=25+e.type*12;
         e.legs=50+e.type*12; e.cooldown=3+i*1.3f;e.sinceHit=100;
@@ -211,7 +220,7 @@ void Combat::fire(int weapon) {
         }
         Vec3 end=origin+dir*nearest;
         // Terrain stops shots aimed into the ground before they reach a target.
-        for(float d=2;d<nearest;d+=2) { Vec3 q=origin+dir*d; if(q.y<terrainHeight(q.x,q.z)||solidAt(q)) {end=q;hit=-1;break;} }
+        for(float d=2;d<nearest;d+=2) { Vec3 q=origin+dir*d; if(q.y<groundHeight(q.x,q.z)||blockedAt(q)) {end=q;hit=-1;break;} }
         float life=weapon==0?0.13f:0.09f;
         beams.push_back({muzzle,end,life,life,weapon});
         if(hit>=0) {damageEnemy(hit,damage*player.damage,legHit);target=enemies[hit].alive?hit:-1;}
@@ -260,11 +269,34 @@ void Combat::update(float dt,const Controls& input) {
     player.turnRate+=clamp(input.turn*turnSpeed-player.turnRate,-dt*1.2f,dt*1.2f);
     player.yaw=std::remainder(player.yaw+player.turnRate*dt,2*pi);
     Vec3 previousPlayer=player.pos;
+    // Each patrol sector / route leg is one waypoint; extraction is separate.
+    int activeWaypoint=extractionOpen?-1:wave;
+    if(activeWaypoint!=arrivalWaypoint) {
+        arrivalWaypoint=activeWaypoint;
+        waypointArrivalReported=false;
+    }
+    Vec3 arrivalPoint=navigationPoint();
     player.pos+=direction(player.yaw)*(player.speed*dt);
     player.pos+=direction(player.yaw+pi/2)*(player.sideSpeed*dt);
-    player.pos.x=clamp(player.pos.x,-battlefieldLimit,battlefieldLimit); player.pos.z=clamp(player.pos.z,-battlefieldLimit,battlefieldLimit);
-    resolveMovement(player.pos,previousPlayer,3.5f);
-    player.pos.y=terrainHeight(player.pos.x,player.pos.z);
+    float limit=missionLayouts[mission].limit;
+    player.pos.x=clamp(player.pos.x,-limit,limit); player.pos.z=clamp(player.pos.z,-limit,limit);
+    if(!missionLayouts[mission].flat)resolveMovement(player.pos,previousPlayer,3.5f);
+    player.pos.y=groundHeight(player.pos.x,player.pos.z);
+    // A new marker already inside the radius is not a physical arrival.
+    if(!waypointArrivalReported&&(player.pos.x!=previousPlayer.x||player.pos.z!=previousPlayer.z)&&
+       length(previousPlayer-arrivalPoint)>=waypointArrivalRadius&&length(player.pos-arrivalPoint)<waypointArrivalRadius) {
+        waypointArrivalReported=true;
+        events.push_back(Event::WaypointReached);
+        if(navigationOnly()) {
+            if(wave<missionLayouts[mission].routeWaypoints) {
+                ++wave;arrivalWaypoint=wave;waypointArrivalReported=false;
+                announce("NAVIGATION // Proceed to waypoint "+std::to_string(wave)+".",4);
+            } else {
+                phase=Phase::Won;
+                announce("TEST COMPLETE // Five waypoints reached.",100);
+            }
+        }
+    }
     Vec3 motion=dt>0?(player.pos-previousPlayer)*(1/dt):Vec3{};motion.y=0;
     std::array<GaitTransition,4> transitions{};
     int count=player.gait.advance(dt,dot(motion,direction(player.yaw)),dot(motion,direction(player.yaw+pi/2)),
@@ -297,7 +329,7 @@ void Combat::update(float dt,const Controls& input) {
         }
         e.pos.x=clamp(e.pos.x,-battlefieldLimit+20,battlefieldLimit-20); e.pos.z=clamp(e.pos.z,-battlefieldLimit+20,battlefieldLimit-20);
         resolveMovement(e.pos,previousEnemy,3.5f);
-        e.pos.y=terrainHeight(e.pos.x,e.pos.z);
+        e.pos.y=groundHeight(e.pos.x,e.pos.z);
         Vec3 enemyMotion=dt>0?(e.pos-previousEnemy)*(1/dt):Vec3{};enemyMotion.y=0;
         int enemySteps=e.gait.advance(dt,dot(enemyMotion,direction(e.yaw)),dot(enemyMotion,direction(e.yaw+pi/2)),0,
                                      chassis[e.type].speed,chassis[e.type].mass,transitions);
@@ -327,7 +359,7 @@ void Combat::update(float dt,const Controls& input) {
                 damageEnemy(i,p.damage); explode(p.pos,12); p.life=-1;break;
             }
         } else if(length(p.pos-eye())<4.5f) {damagePlayer(p.damage);p.life=-1;}
-        if(p.pos.y<terrainHeight(p.pos.x,p.pos.z)||solidAt(p.pos)) {explode(p.pos,5);p.life=-1;}
+        if(p.pos.y<groundHeight(p.pos.x,p.pos.z)||blockedAt(p.pos)) {explode(p.pos,5);p.life=-1;}
     }
     projectiles.erase(std::remove_if(projectiles.begin(),projectiles.end(),[](auto& p){return p.life<=0;}),projectiles.end());
     for(auto& b:beams) b.life-=dt;
@@ -339,7 +371,7 @@ void Combat::update(float dt,const Controls& input) {
         announce("SALVAGE RECOVERED // +"+std::to_string(p.value)+" alloy. Field repairs +12.",3);
         events.push_back(Event::Lock);
     }
-    if(alive==0&&!extractionOpen) {
+    if(alive==0&&!extractionOpen&&!navigationOnly()) {
         waveDelay+=dt;
         if(spawned<missions[mission].enemies&&waveDelay>3) {spawnWave();waveDelay=0;announce("COMMAND // Advance to the next patrol sector.",5);}
         else if(kills==missions[mission].enemies) {extractionOpen=true;announce("SECTOR CLEAR // Reach the green extraction beacon.",8);events.push_back(Event::Wave);}

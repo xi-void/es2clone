@@ -12,14 +12,14 @@ from import_original_audio import digest, safe_path, vol_entries, write_once
 MEMBERS = {'hb0/tomahawk.hb0': 'TOMAHAWK.HB0', 'dpl/cockpit.dpl': 'COCKPIT.DPL'}
 
 
-def read_members(source):
+def read_members(source, members=MEMBERS):
     if source.is_file():
         data = source.read_bytes()
         return {p.as_posix().lower(): payload for p, flag, payload, _, _ in vol_entries(data)
-                if p.as_posix().lower() in MEMBERS and flag == 2}, digest(data)
+                if p.as_posix().lower() in members and flag == 2}, digest(data)
     found = {}
     for p in source.rglob('*'):
-        if p.is_file() and p.parent.name.lower() + '/' + p.name.lower() in MEMBERS:
+        if p.is_file() and p.parent.name.lower() + '/' + p.name.lower() in members:
             if p.is_symlink():
                 raise ValueError(f'Refusing symlink source: {p}')
             key = p.parent.name.lower() + '/' + p.name.lower()
@@ -31,7 +31,7 @@ def read_members(source):
     volumes = [p for p in source.rglob('*') if p.is_file() and p.name.lower() == 'simvol0.vol']
     if len(volumes) != 1:
         raise ValueError('Expected one SIMVOL0.VOL; pass its path or its extracted resource directory')
-    return read_members(volumes[0])
+    return read_members(volumes[0], members)
 
 
 def validate(members):

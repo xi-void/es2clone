@@ -2,6 +2,7 @@
 #include "simulation.hpp"
 #include "synthesis.hpp"
 #include "radar.hpp"
+#include "original_models.hpp"
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <GL/gl.h>
@@ -31,12 +32,22 @@ class Renderer {
 public:
     bool init(const std::string& assetPath);
     bool loadOriginalCockpit(const std::string& directory);
+    bool loadOriginalModels(const std::string& directory);
     void destroy();
     void render(int width,int height,const Combat& game,const UIState& ui);
     bool screenshot(const std::string& path,int width,int height);
     Action hit(float x,float y) const;
     std::vector<Button> buttons;
 private:
+    friend struct ModelRenderTest;
+    struct OriginalHerc {
+        original::HercAsset asset;
+        std::vector<GLuint> textures;
+        GLuint lists=0;
+    };
+    std::array<OriginalHerc,2> originalHercs;
+    bool originalMech(const Gait& gait,HercAppearance appearance,float torso,float pitch,Vec3 pos,float yaw,float size,bool flat);
+    void destroyOriginalModels();
     Font display,mono;
     GLuint terrainList=0,sceneryList=0,groundTexture=0;
     GLuint originalCockpitTexture=0;
@@ -64,7 +75,8 @@ private:
     void box(Vec3 pos,Vec3 size,Color c);
     void cylinder(Vec3 pos,float radius,float height,Color c,int sides=8);
     void mountain(float x,float z,float radius,float height,Color c,int seed);
-    void mech(Vec3 pos,float yaw,const Gait& gait,int type,bool friendly,float damage=0,float death=0);
+    void mech(Vec3 pos,float yaw,const Gait& gait,int type,bool friendly,float damage=0,float death=0,
+              HercAppearance appearance=HercAppearance::Automatic,bool flat=false,float torso=0,float pitch=0);
     void strut(Vec3 a,Vec3 b,float width,float depth,Color c);
     void bevel(float x,float y,float w,float h,float rim,Color face);
     void schematic(float x,float y,float scale,float armor,float legs,float stroke=2);

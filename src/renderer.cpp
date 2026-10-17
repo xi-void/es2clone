@@ -42,7 +42,7 @@ bool Renderer::init(const std::string& path) {
     glEnable(GL_NORMALIZE);glDisable(GL_CULL_FACE);
     makeTerrain();return true;
 }
-void Renderer::destroy() {if(originalCockpitTexture)glDeleteTextures(1,&originalCockpitTexture);if(display.texture)glDeleteTextures(1,&display.texture);if(mono.texture)glDeleteTextures(1,&mono.texture);if(groundTexture)glDeleteTextures(1,&groundTexture);if(terrainList)glDeleteLists(terrainList,1);if(sceneryList)glDeleteLists(sceneryList,1);}
+void Renderer::destroy() {destroyOriginalModels();if(originalCockpitTexture)glDeleteTextures(1,&originalCockpitTexture);if(display.texture)glDeleteTextures(1,&display.texture);if(mono.texture)glDeleteTextures(1,&mono.texture);if(groundTexture)glDeleteTextures(1,&groundTexture);if(terrainList)glDeleteLists(terrainList,1);if(sceneryList)glDeleteLists(sceneryList,1);}
 void Renderer::begin2D(float width,float height) {
     uiWidth=width;uiHeight=height;
     GLint viewport[4];glGetIntegerv(GL_VIEWPORT,viewport);
@@ -175,10 +175,12 @@ void Renderer::strut(Vec3 a,Vec3 b,float width,float depth,Color c) {
     if(length(axis)>0.001f)glRotatef(std::acos(clamp(delta.y/distance,-1,1))*180/pi,axis.x,axis.y,axis.z);
     box({0,0,0},{width,distance,depth},c);glPopMatrix();
 }
-void Renderer::mech(Vec3 pos,float yaw,const Gait& gait,int type,bool friendly,float damage,float death) {
+void Renderer::mech(Vec3 pos,float yaw,const Gait& gait,int type,bool friendly,float damage,float death,HercAppearance appearance,bool flat,float torso,float pitch) {
     shadow(pos,9);glPushMatrix();glTranslatef(pos.x,pos.y,pos.z);glRotatef(-yaw*180/pi,0,1,0);
     float size=type==1?1.12f:type==2?0.88f:1.0f;glScalef(size,size,size);
     if(death>0){glTranslatef(0,-std::min(death,1.0f)*4.3f,0);glRotatef(std::min(death,1.0f)*68,1,0,0);}
+    if(appearance==HercAppearance::Automatic)appearance=friendly?chassis[type].appearance:type==0?HercAppearance::Achilles:HercAppearance::Prototype;
+    if(originalMech(gait,appearance,torso,pitch,pos,yaw,size,flat)){glPopMatrix();return;}
     Color armor=friendly?Color{0.35f,0.40f,0.34f}:Color{0.38f,0.32f,0.28f};
     Color edge=friendly?Color{0.49f,0.53f,0.43f}:Color{0.46f,0.40f,0.33f};
     Color dark{0.12f,0.16f,0.15f},steel{0.33f,0.37f,0.34f},accent=friendly?orange:Color{0.68f,0.19f,0.12f};
@@ -187,7 +189,7 @@ void Renderer::mech(Vec3 pos,float yaw,const Gait& gait,int type,bool friendly,f
         Vec3 foot=gait.foot(side).offset;
         float wx=pos.x+(foot.x*std::cos(yaw)-foot.z*std::sin(yaw))*size;
         float wz=pos.z+(foot.x*std::sin(yaw)+foot.z*std::cos(yaw))*size;
-        foot.y+=(terrainHeight(wx,wz)-pos.y)/size;
+        foot.y+=(flat?0:terrainHeight(wx,wz)-pos.y)/size;
         Vec3 ankle=foot+Vec3{0,1.15f,0},hip{side*2.25f,6.5f+gait.bodyLift(),0};
         Vec3 delta=ankle-hip;
         float bend=std::sqrt(std::max(0.05f,3.5f*3.5f-dot(delta,delta)*0.25f));
@@ -235,18 +237,26 @@ void Renderer::world(const Combat& game,bool menuMode,float time) {
     const float ambient[]={0.40f,0.43f,0.50f,1},sun[]={0.90f,0.86f,0.85f,1},position[]={-0.4f,0.85f,0.6f,0};
     glLightModelfv(GL_LIGHT_MODEL_AMBIENT,ambient);glLightfv(GL_LIGHT0,GL_DIFFUSE,sun);glLightfv(GL_LIGHT0,GL_POSITION,position);
     glEnable(GL_FOG);const float fog[]={0.24f,0.20f,0.22f,1};glFogfv(GL_FOG_COLOR,fog);glFogi(GL_FOG_MODE,GL_LINEAR);glFogf(GL_FOG_START,350);glFogf(GL_FOG_END,2300);
-    glEnable(GL_TEXTURE_2D);glBindTexture(GL_TEXTURE_2D,groundTexture);glCallList(terrainList);glDisable(GL_TEXTURE_2D);glCallList(sceneryList);
+    glEnable(GL_TEXTURE_2D);glBindTexture(GL_TEXTURE_2D,groundTexture);
+    if(!menuMode&&missionLayouts[game.mission].flat) {
+        // Same ground material; the test range has no relief or scenery obstacles.
+        color({1,1,1});glNormal3f(0,1,0);glBegin(GL_QUADS);
+        glTexCoord2f(-60,-60);glVertex3f(-1680,0,-1680);glTexCoord2f(-60,60);glVertex3f(-1680,0,1680);
+        glTexCoord2f(60,60);glVertex3f(1680,0,1680);glTexCoord2f(60,-60);glVertex3f(1680,0,-1680);
+        glEnd();glDisable(GL_TEXTURE_2D);
+    } else {glCallList(terrainList);glDisable(GL_TEXTURE_2D);glCallList(sceneryList);}
     if(menuMode) {Vec3 pos{11,terrainHeight(11,0),0};mech(pos,pi+0.65f+std::sin(time*0.12f)*0.12f,Gait{},state->chassis,true);}
     else {
-        for(const auto& e:game.enemies) mech(e.pos,e.yaw,e.gait,e.type,false,e.flash,e.deathTime);
+        for(const auto& e:game.enemies) mech(e.pos,e.yaw,e.gait,e.type,false,e.flash,e.deathTime,e.appearance,missionLayouts[game.mission].flat);
         glDisable(GL_LIGHTING);
         for(const auto& p:game.pickups) if(!p.collected) {
             glPushMatrix();glTranslatef(p.pos.x,p.pos.y+2.0f+std::sin(time*2)*0.5f,p.pos.z);glRotatef(time*35,0,1,0);box({0,0,0},{1.3f,1.3f,1.3f},mint);glPopMatrix();
         }
         glDepthMask(GL_FALSE);
-        if(game.extractionOpen) {
-            color({0.25f,0.9f,0.58f,0.12f});glBegin(GL_QUAD_STRIP);for(int i=0;i<=48;++i){float a=i*2*pi/48;glVertex3f(game.extraction.x+std::cos(a)*22,game.extraction.y+0.1f,game.extraction.z+std::sin(a)*22);glVertex3f(game.extraction.x+std::cos(a)*22,game.extraction.y+30,game.extraction.z+std::sin(a)*22);}glEnd();
-            glLineWidth(2);color(mint);glBegin(GL_LINE_LOOP);for(int i=0;i<48;++i){float a=i*2*pi/48;glVertex3f(game.extraction.x+std::cos(a)*22,game.extraction.y+0.2f,game.extraction.z+std::sin(a)*22);}glEnd();
+        if(game.extractionOpen||game.navigationOnly()) {
+            auto point=game.navigationPoint();
+            color({0.25f,0.9f,0.58f,0.12f});glBegin(GL_QUAD_STRIP);for(int i=0;i<=48;++i){float a=i*2*pi/48;glVertex3f(point.x+std::cos(a)*22,point.y+0.1f,point.z+std::sin(a)*22);glVertex3f(point.x+std::cos(a)*22,point.y+30,point.z+std::sin(a)*22);}glEnd();
+            glLineWidth(2);color(mint);glBegin(GL_LINE_LOOP);for(int i=0;i<48;++i){float a=i*2*pi/48;glVertex3f(point.x+std::cos(a)*22,point.y+0.2f,point.z+std::sin(a)*22);}glEnd();
         }
         for(const auto& b:game.beams){glLineWidth(b.kind==0?4:3);Color c=b.kind==0?Color{0.40f,1,0.83f,b.life/b.maxLife}:Color{1,0.75f,0.28f,b.life/b.maxLife};color(c);glBegin(GL_LINES);vertex(b.a);vertex(b.b);glEnd();}
         for(const auto& p:game.projectiles) {Color c=p.friendly?Color{1,0.73f,0.27f}:Color{1,0.23f,0.08f};box(p.pos,{0.65f,0.65f,0.65f},c);glLineWidth(p.friendly?3:2);color(c);glBegin(GL_LINES);vertex(p.pos);vertex(p.pos-p.velocity*0.06f);glEnd();}
@@ -280,10 +290,11 @@ void Renderer::menu(const UIState& ui) {
     text(65,414,"THE MACHINES TOOK EARTH.",19,cream,true,0.7f);
     text(65,445,"Take it back. One hundred tons at a time.",14,muted);
     rect(64,500,514,145,{0.055f,0.075f,0.069f,0.88f});rect(64,500,3,145,orange);
-    text(84,518,"OPERATION 0"+std::to_string(ui.mission+1)+" / 03",11,orange,false,1);
+    text(84,518,"OPERATION 0"+std::to_string(ui.mission+1)+" / 0"+std::to_string(missionCount),11,orange,false,1);
     text(84,545,missions[ui.mission].name,28,cream,true);
-    text(84,585,missions[ui.mission].region+std::string("  /  ")+std::to_string(missions[ui.mission].enemies)+" HOSTILES",11,muted);
-    text(84,610,"ELIMINATE. SALVAGE. EXTRACT.",11,mint);
+    bool route=missionLayouts[ui.mission].routeWaypoints>0;
+    text(84,585,missions[ui.mission].region+std::string("  /  ")+(route?"5 WAYPOINTS":std::to_string(missions[ui.mission].enemies)+" HOSTILES"),11,muted);
+    text(84,610,route?"FOLLOW WP1 THROUGH WP5. NO COMBAT.":"ELIMINATE. SALVAGE. EXTRACT.",11,mint);
     button(474,518,37,32,"<",Action::PrevMission);button(523,518,37,32,">",Action::NextMission);
     button(64,669,330,62,"DEPLOY HERC    >",Action::Launch,true);button(408,669,170,62,"HANGAR",Action::Hangar);
     text(65,750,"ENTER  Deploy   H  Hangar   F1  Manual   F2  Audio",11,muted);
@@ -322,8 +333,8 @@ void Renderer::radar(const Combat& game,float x,float y,float size) {
     auto diamond=[&](RadarPoint p,Color c,float radius){float px=cx+p.x*r,py=cy+p.y*r;
         line(px,py-radius,px+radius,py,c);line(px+radius,py,px,py+radius,c);
         line(px,py+radius,px-radius,py,c);line(px-radius,py,px,py-radius,c);};
-    for(const auto& landmark:landmarks){auto p=point(landmark.pos);if(p.inRange)outline(cx+p.x*r-1.5f*scale,cy+p.y*r-1.5f*scale,3*scale,3*scale,dim);}
-    auto exit=point(game.extraction);diamond(exit,game.extractionOpen?green:dim,3*scale);
+    if(!game.navigationOnly())for(const auto& landmark:landmarks){auto p=point(landmark.pos);if(p.inRange)outline(cx+p.x*r-1.5f*scale,cy+p.y*r-1.5f*scale,3*scale,3*scale,dim);}
+    if(!game.navigationOnly()){auto exit=point(game.extraction);diamond(exit,game.extractionOpen?green:dim,3*scale);}
     if(!game.extractionOpen)diamond(point(game.navigationPoint()),{0.98f,0.68f,0.13f},3.7f*scale);
     for(size_t i=0;i<game.enemies.size();++i)if(game.enemies[i].alive) {
         auto p=point(game.enemies[i].pos);if(!p.inRange)continue;
@@ -393,7 +404,7 @@ void Renderer::hud(const Combat& game,const UIState& ui) {
     float rx=720,ry=450;project(game.eye()+game.aim()*300,rx,ry);
     circle(rx,ry,23,game.hitFlash>0?green:cream,false,32);
     line(rx-36,ry,rx-17,ry,cream,2);line(rx+17,ry,rx+36,ry,cream,2);line(rx,ry-36,rx,ry-17,cream,2);line(rx,ry+17,rx,ry+36,cream,2);
-    if(game.extractionOpen){float x,y;if(project(game.extraction+Vec3{0,9,0},x,y)){outline(x-13,y-13,26,26,green,2);centered(x,y-35,"EXTRACT",14,green);}}
+    if(game.extractionOpen||game.navigationOnly()){float x,y;if(project(game.navigationPoint()+Vec3{0,9,0},x,y)){outline(x-13,y-13,26,26,green,2);centered(x,y-35,game.extractionOpen?"EXTRACT":"WP "+std::to_string(game.wave),14,green);}}
     text(369,555,"SPEED:",16,label);text(446,555,num(std::hypot(p.speed,p.sideSpeed)*3.6f)+" KPH",16,cyan);
     int seconds=int(game.time);text(904,555,"TIME:",16,label);text(965,555,(seconds/60<10?"0":"")+std::to_string(seconds/60)+":"+(seconds%60<10?"0":"")+std::to_string(seconds%60),16,cyan);
     // Contact impulses move only the close console by a fraction of a pixel.
@@ -457,14 +468,14 @@ void Renderer::pause(const UIState&) {
     button(975,382,245,52,"F2  AUDIO MIXER",Action::AudioSettings);button(505,382,430,58,"RESUME MISSION",Action::Resume,true);button(505,456,430,52,"FIELD MANUAL",Action::Controls);button(505,524,430,52,"RESTART MISSION",Action::Retry);button(505,592,430,52,"RETURN TO HANGAR",Action::Hangar);button(505,660,430,52,"EXIT TO DESKTOP",Action::Quit);
 }
 void Renderer::debrief(const Combat& game,const UIState& ui) {
-    bool won=game.phase==Phase::Won;rect(0,0,1440,900,{0.02f,0.04f,0.035f,0.91f});
-    text(400,161,won?"// EXTRACTION CONFIRMED":"// HERC SIGNAL LOST",12,won?mint:orange,false,1);text(395,205,won?"WELCOME HOME.":"NOT THE END.",61,cream,true);
-    text(400,289,won?"One more piece of Earth belongs to us.":"The resistance needs you. Refit and try again.",15,muted);
+    bool won=game.phase==Phase::Won,route=game.navigationOnly();rect(0,0,1440,900,{0.02f,0.04f,0.035f,0.91f});
+    text(400,161,route?"// NAVIGATION TEST":won?"// EXTRACTION CONFIRMED":"// HERC SIGNAL LOST",12,won?mint:orange,false,1);text(395,205,route&&won?"TEST COMPLETE.":won?"WELCOME HOME.":"NOT THE END.",61,cream,true);
+    text(400,289,route&&won?"Five waypoints reached. Ready for another run.":won?"One more piece of Earth belongs to us.":"The resistance needs you. Refit and try again.",15,muted);
     line(400,345,1040,345,border);
-    const char* labels[]={"OPERATION", "HOSTILES DESTROYED", "MISSION TIME", "SALVAGE BANKED", "TOTAL RESERVE"};
-    std::string values[]={missions[game.mission].name,std::to_string(game.kills)+" / "+std::to_string(missions[game.mission].enemies),num(game.time/60,1)+" MIN",won?std::to_string(game.salvage)+" ALLOY":"0 ALLOY",std::to_string(ui.bank)+" ALLOY"};
+    const char* labels[]={"OPERATION", route?"WAYPOINTS REACHED":"HOSTILES DESTROYED", "MISSION TIME", "SALVAGE BANKED", "TOTAL RESERVE"};
+    std::string values[]={missions[game.mission].name,route?std::to_string(won?5:game.wave-1)+" / 5":std::to_string(game.kills)+" / "+std::to_string(missions[game.mission].enemies),num(game.time/60,1)+" MIN",won&&!game.testMission()?std::to_string(game.salvage)+" ALLOY":"0 ALLOY",std::to_string(ui.bank)+" ALLOY"};
     for(int i=0;i<5;++i){float y=378+i*47.0f;text(400,y,labels[i],12,muted);text(774,y,values[i],14,i>=3?orange:cream,true);}
-    button(400,660,306,61,won?"NEXT OPERATION   >":"RETRY MISSION   >",won?Action::Next:Action::Retry,true);button(726,660,314,61,"RETURN TO HANGAR",Action::Hangar);button(400,744,640,44,"EXIT TO DESKTOP",Action::Quit);
+    button(400,660,306,61,game.testMission()?"RESTART TEST   >":won?"NEXT OPERATION   >":"RETRY MISSION   >",won&&!game.testMission()?Action::Next:Action::Retry,true);button(726,660,314,61,"RETURN TO HANGAR",Action::Hangar);button(400,744,640,44,"EXIT TO DESKTOP",Action::Quit);
 }
 void Renderer::render(int width,int height,const Combat& game,const UIState& ui) {
     pixelWidth=std::max(1,width);pixelHeight=std::max(1,height);state=&ui;buttons.clear();glViewport(0,0,pixelWidth,pixelHeight);
