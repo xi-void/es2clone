@@ -74,3 +74,7 @@ establish those behaviors.
 The [battlefield increment](battlefield.md) adds a functional heading-up radar, 2.4 km-square custom mission layouts, startup-timed insertion, and mission/kill marquees. Computer kill voice IDs 50/51 are verified through SYSTEM.STR and original executable references. Every earlier sound association is retained. Cockpit target occlusion and coordinate scaling are corrected without changing the source artwork or gait.
 
 These additions remain approximate gameplay: sensor occlusion/jamming, original terrain, missions and dropship scripts are still missing. Original Tomahawk pixels and the two newly identified voice recordings are reused; no original deployment animation or terrain resource is claimed. The next original-compatibility gates remain gauge/font/layout decoding and one verified original terrain/mission, as listed above.
+
+## Original terrain investigation (2026-10-18)
+
+The [terrain resource inspection](original-terrain.md) found relief-like DBA grids, paired 16-byte zone DAT records, WLD environment descriptors, and opaque RMP resources. Generic DBA decoding works, but mission-to-zone linkage, height units/orientation, WLD/RMP semantics, and original ground texture mapping are not established. The analytic terrain and matching simulation height query remain in use; no original environment is claimed integrated.
