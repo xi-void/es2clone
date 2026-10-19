@@ -52,3 +52,6 @@ The last two checks require the local original recordings and supplied soundtrac
 Simulation tests cover radar orientation/range, mission spacing, insertion descent and control interlocks, actual leg/torso weapon hits, duplicate suppression, and completion of all three operations using ordinary weapons and movement. Existing gait/turbo and audio regressions remain in place. The local before/after audit compares every old event's rendered PCM and continuous layers, mappings, volumes and source asset hashes.
 
 Offscreen rendering and SDL's dummy audio driver verify native rendering and audio sample delivery in the restricted environment. They do not constitute a physical speaker or integrated-GPU performance test. Closer fidelity needs original sensor/deployment behavior measurements and the undecoded graphics/terrain/mission resources; no missing asset blocks this increment.
+
+
+Waypoint Test Range exercises sequential navigation markers without enemies or extraction objectives.

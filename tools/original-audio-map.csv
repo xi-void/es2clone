@@ -18,3 +18,4 @@ overheat,VOL/SIMSOUND.VOL/hmi/WRNWOOP2.WAV,WRNWOOP2 warning whoop identifier in 
 turbo_engage,VOL/SIMSOUND.VOL/hmi/THROTL.WAV,Verified DBSIM.EXE TURBO_POD vtable 0x498bec -> method 0x40f1f0; activation at 0x40f244 calls sound 44; SOUNDS.STR entry 44 is throtl.wav
 enemy_destroyed,VOL/SIMVOICE.VOL/SIMVOICE/CVM_0050.WAV,SYSTEM.STR message 46 ENEMY TARGET DESTROYED has voice byte 50; DBSIM.EXE 0x434fa2 copies metadata[7] to message+0x2c; 0x436ca4 formats it as CVM_00xx
 enemy_disabled,VOL/SIMVOICE.VOL/SIMVOICE/CVM_0051.WAV,SYSTEM.STR message 47 ENEMY TARGET DISABLED has voice byte 51; same verified loader and CVM filename path as destroyed
+waypoint_reached,VOL/SIMVOICE.VOL/SIMVOICE/CVM_0031.WAV,SYSTEM.STR message 29 WAYPOINT REACHED has voice byte 31; DBSIM.EXE 0x434fa2 copies metadata[7] to message+0x2c; 0x436ca4 formats it as CVM_00xx

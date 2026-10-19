@@ -13,7 +13,7 @@ std::string lower(std::string s){for(char& c:s)c=char(std::tolower(static_cast<u
 bool supported(const fs::path& p){auto s=lower(p.extension().string());return s==".wav"||s==".mp3"||s==".flac"||s==".ogg";}
 bool safe(const fs::path& p){if(p.empty()||p.is_absolute())return false;for(const auto& part:p)if(part=="..")return false;return true;}
 const char* names[]={"laser","cannon","missile","impact","explosion","lock","wave","win","lose","overheat",
- "foot_left","foot_right","hydraulic_left","hydraulic_right","reactor_ignition","system_init","mechanical_activate","reactor_ready","turbo_engage","turbo_release","reactor_shutdown","damage_warning","enemy_destroyed","enemy_disabled"};
+ "foot_left","foot_right","hydraulic_left","hydraulic_right","reactor_ignition","system_init","mechanical_activate","reactor_ready","turbo_engage","turbo_release","reactor_shutdown","damage_warning","enemy_destroyed","enemy_disabled","waypoint_reached"};
 static_assert(sizeof(names)/sizeof(*names)==size_t(Event::Count));
 }
 AudioDecoder::~AudioDecoder(){if(stream)SDL_FreeAudioStream(stream);if(file)sf_close(file);}

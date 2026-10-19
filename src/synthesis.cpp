@@ -18,7 +18,7 @@ bool hydraulicEvent(Event e){return e==Event::HydraulicLeft||e==Event::Hydraulic
 bool weightedEvent(Event e){return footEvent(e)||hydraulicEvent(e)||e==Event::ReactorIgnition||e==Event::MechanicalActivate;}
 AudioBus busFor(Event e) {
     if(e==Event::Laser||e==Event::Cannon||e==Event::Missile||e==Event::Impact||e==Event::Explosion)return AudioBus::Weapons;
-    if(e==Event::Lock||e==Event::Wave||e==Event::Win||e==Event::Lose||e==Event::Overheat||e==Event::DamageWarning||e==Event::EnemyDestroyed||e==Event::EnemyDisabled)return AudioBus::Interface;
+    if(e==Event::Lock||e==Event::Wave||e==Event::Win||e==Event::Lose||e==Event::Overheat||e==Event::DamageWarning||e==Event::EnemyDestroyed||e==Event::EnemyDisabled||e==Event::WaypointReached)return AudioBus::Interface;
     return AudioBus::Machinery;
 }
 
@@ -78,8 +78,8 @@ std::vector<float> generate(Event event,int weight,int variant) {
             float phase=engage?(95*t+115*t*t):(420*t-100*t*t);
             sample=(std::sin(2*pi*phase)*0.046f+std::sin(2*pi*48*t)*0.085f+(noise.mid-noise.low)*0.12f)*e;
             if(engage)sample+=std::sin(2*pi*67*t)*envelope(t,0.008f,0.10f)*0.13f;
-        } else if(event==Event::EnemyDestroyed||event==Event::EnemyDisabled) {
-            // A quiet notification when original speech is absent; the marquee supplies the words.
+        } else if(event==Event::EnemyDestroyed||event==Event::EnemyDisabled||event==Event::WaypointReached) {
+            // A quiet notification when original speech is absent.
             sample=std::sin(2*pi*880*t)*envelope(t,0.008f,0.12f)*0.10f;
         } else {
             float frequency=event==Event::Laser?920:event==Event::Lock?1320:event==Event::Overheat?650:85;

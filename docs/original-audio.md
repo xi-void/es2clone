@@ -83,3 +83,8 @@ The script recognizes **only verified uncompressed VOLN** records and PCM WAVs. 
 The repository and public package contain the importer, configuration, mapping metadata, documentation, and procedural fallback code. Supplying a local copy does not add it to Git. Do not force-add ignored media.
 
 Remaining manual work is optional: audition ambiguous original recordings and provide better mappings. The supplied ISO and album are enough for the implemented original effects, startup cue, and mission soundtrack.
+
+
+## Waypoint arrival notification
+
+`SYSTEM.STR` message 29, `WAYPOINT REACHED`, carries voice byte 31 and maps to `SIMVOICE.VOL/SIMVOICE/CVM_0031.WAV` through the verified message loader. The event uses `waypoint_reached`; the mapping is recorded in `tools/original-audio-map.csv`.

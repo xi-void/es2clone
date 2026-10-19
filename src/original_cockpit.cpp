@@ -62,7 +62,7 @@ void Renderer::originalHud(const Combat& game,const UIState&) {
     Color aimColor=game.hitFlash>0?green:white;
     circle(rx,ry,11,aimColor,false,32);line(rx-18,ry,rx-8,ry,aimColor);line(rx+8,ry,rx+18,ry,aimColor);
     line(rx,ry-18,rx,ry-8,aimColor);line(rx,ry+8,rx,ry+18,aimColor);
-    if(game.extractionOpen){float x,y;if(projectOriginal(game.extraction+Vec3{0,9,0},x,y)){outline(x-6,y-6,12,12,green);centered(x,y-17,"EXTRACT",8,green);}}
+    if(game.extractionOpen||game.navigationOnly()){float x,y;if(projectOriginal(game.navigationPoint()+Vec3{0,9,0},x,y)){outline(x-6,y-6,12,12,green);centered(x,y-17,game.extractionOpen?"EXTRACT":"WP "+std::to_string(game.wave),8,green);}}
     text(199,291,"SPEED: "+number(std::hypot(p.speed,p.sideSpeed)*3.6f)+" KPH",8,cyan);
     int seconds=int(game.time);text(365,291,"TIME: "+std::to_string(seconds/60)+":"+(seconds%60<10?"0":"")+std::to_string(seconds%60),8,cyan);
 
